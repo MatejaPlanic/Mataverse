@@ -1,4 +1,4 @@
-#include "SpaceShip.h"
+﻿#include "SpaceShip.h"
 using namespace glm;
 using namespace std;
 
@@ -19,6 +19,18 @@ static vector<vec3> operator*(mat4x4 mat, vector<vec3> vectors)
 SpaceShip::SpaceShip()
 {
     lopta = kreirajLoptu(0.2f, 64, 64);
+    nebo = kreirajLoptu(20.0f, 64, 64);
+
+    const int brojZvezda = 300;
+    zvezde.resize(brojZvezda);
+    for (int i = 0; i < brojZvezda; ++i) {
+        float fi = 2.0f * 3.14f * (rand() / (float)RAND_MAX);
+        float teta = 3.14f * (rand() / (float)RAND_MAX);
+        float r = 19.5f; 
+        zvezde[i].x = r * sin(teta) * cos(fi);
+        zvezde[i].y = r * sin(teta) * sin(fi);
+        zvezde[i].z = r * cos(teta);
+    }
 }
 
 SpaceShip::~SpaceShip() {}
@@ -56,6 +68,7 @@ vector<vec3> SpaceShip::kreirajKruznicu(vec3 centar, float r, int brojTacaka) co
 vector<vector<vec3>> SpaceShip::kreirajLoptu(float r, int brojTacakaKruznice, int brojKruznica) const
 {
     vector<vector<vec3>> l;
+
     l.resize(brojKruznica);
     for (int i = 0; i < brojKruznica; i++)
         l[i].resize(brojTacakaKruznice);
@@ -99,6 +112,8 @@ void SpaceShip::spojiKruznice(const vector<vec3>& prva, const vector<vec3>& drug
 
 void SpaceShip::drawKupola() const
 {
+	glPushMatrix();
+    glScalef(1.0f, 0.5f, 1.0f);
     float r = 0.1f, g = 0.1f, b = 0.1f;
 
     if (!lopta.empty())
@@ -111,6 +126,7 @@ void SpaceShip::drawKupola() const
         spojiKruznice(lopta[i - 1], lopta[i]);
         r += 0.001f; g += 0.001f; b += 0.001f;
     }
+	glPopMatrix();
 }
 
 vector<vector<vec3>> SpaceShip::kreirajTorus(float R, float r, int slicesMajor, int slicesMinor) const
@@ -120,10 +136,10 @@ vector<vector<vec3>> SpaceShip::kreirajTorus(float R, float r, int slicesMajor, 
 
     torus.resize(slicesMajor);
 
-    torus[0] = kreirajKruznicu(vec3(R, 0, 0), r, slicesMinor);
+    torus[0] = kreirajKruznicu(vec3(R, -0.02, 0), r, slicesMinor);
 
-    float dphi = 2.0f * 3.14f / (float)slicesMajor;
-    mat4x4 rotY = rotate(dphi, vec3(0, 1, 0));
+    float fi = 2.0f * 3.14f / (float)slicesMajor;
+    mat4x4 rotY = rotate(fi, vec3(0, 1, 0));
     for (int i = 1; i < slicesMajor; ++i)
         torus[i] = rotY * torus[i - 1];
 
@@ -133,17 +149,66 @@ vector<vector<vec3>> SpaceShip::kreirajTorus(float R, float r, int slicesMajor, 
 
 void SpaceShip::drawPrsten() const
 {
-    const float R = 0.25f;      
-    const float r = 0.08f;      
-    const int   M = 48;         
-    const int   N = 24;         
+    const float R = 0.25f;
+    const float r = 0.08f;
+    const int   M = 48;
+    const int   N = 24;
     auto torus = kreirajTorus(R, r, M, N);
 
-    glColor3f(0.15f, 0.95f, 0.40f);  
+    glColor3f(0.15f, 0.95f, 0.40f);
     for (int i = 1; i < M; ++i)
         spojiKruznice(torus[i - 1], torus[i]);
 
+    spojiKruznice(torus[M - 1], torus[0]);
 
-    if (M > 1) spojiKruznice(torus[M - 1], torus[0]);
+    const int brojLampica = 12; 
+    const float lampica_r = 0.015f;
 
+    glColor3f(1.0f, 0.0f, 0.0f);
+
+    glPushMatrix();
+    const float lampice_pozicija_R = R + (r/2);
+
+    float ugao_rotacije = 2.0f * 3.14f / brojLampica;
+
+    for (int i = 0; i < brojLampica; i++)
+    {
+        glPushMatrix();
+
+        mat4x4 rotacija = rotate(i * ugao_rotacije, vec3(0, 1, 0));
+        vec3 pozicija = rotacija * vec3(lampice_pozicija_R, 0, 0);
+
+        glTranslatef(pozicija.x, pozicija.y, pozicija.z);
+
+        vector<vec3> lampica = kreirajKruznicu(vec3(0, 0, 0), lampica_r, 16);
+        nacrtaj(GL_POLYGON, lampica);
+
+        glPopMatrix(); 
+    }
+
+    glPopMatrix(); 
+}
+
+void SpaceShip::drawNebo() const
+{
+    glDisable(GL_DEPTH_TEST);
+   
+
+    glColor3f(0.0f, 0.0f, 0.0f); 
+    int n = (int)nebo.size();
+    for (int i = 1; i < n; i++)
+    {
+        spojiKruznice(nebo[i - 1], nebo[i]);
+    }
+    spojiKruznice(nebo[n - 1], nebo[0]);
+
+    glPointSize(2.0f);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glBegin(GL_POINTS);
+    for (const auto& zvezda : zvezde) {
+        glVertex3f(zvezda.x, zvezda.y, zvezda.z);
+    }
+    glEnd();
+
+    glEnable(GL_DEPTH_TEST); 
 }

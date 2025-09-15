@@ -16,7 +16,7 @@ class SpaceShip {
 public:
     SpaceShip();
     ~SpaceShip();
-
+    void drawNebo() const;
     void draw() const;
 
     vec3 position{ 0.0f, 0.0f, 0.0f };
@@ -32,4 +32,6 @@ private:
     void spojiKruznice(const vector<vec3>& prva, const vector<vec3>& druga) const;
     vector<vector<vec3>> kreirajTorus(float R, float r, int slicesMajor, int slicesMinor) const;
     vector<vector<vec3>> lopta;
+    vector<vector<vec3>> nebo;
+    vector<vec3> zvezde;
 };

@@ -26,6 +26,10 @@ const float ratio = 16.f / 9.f;
 double upDownAngle = 0;
 int currentSpeed = 1;
 float arrowRotate = 0.f;
+float cameraDistance = 3.0f; 
+const float minDistance = 1.0f;
+const float maxDistance = 10.0f;
+const float zoomStep = 0.5f;
 
 vec3 operator* (mat4x4 mat, vec3 vec)
 {
@@ -103,6 +107,7 @@ void display(void)
 		LookUp_vector.x, LookUp_vector.y, LookUp_vector.z
 	);
 	drawCoordinates();
+	ship.drawNebo();
 	ship.draw();
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
@@ -173,6 +178,32 @@ void MoveBackward()
 	mt = translate(mat4x4(1.f), v);
 	LookAt_vector = mt * LookAt_vector;
 	CameraPosition = mt * CameraPosition;
+}
+
+void mouseWheel(int wheel, int direction, int x, int y)
+{
+	if (direction > 0)
+	{
+		cameraDistance -= zoomStep;
+	}
+	else
+	{
+		cameraDistance += zoomStep;
+	}
+
+	if (cameraDistance < minDistance)
+	{
+		cameraDistance = minDistance;
+	}
+	if (cameraDistance > maxDistance)
+	{
+		cameraDistance = maxDistance;
+	}
+
+	vec3 viewDirection = normalize(CameraPosition - LookAt_vector);
+	CameraPosition = LookAt_vector + viewDirection * cameraDistance;
+
+	glutPostRedisplay();
 }
 
 void MoveLeft()
@@ -385,6 +416,7 @@ int main(int argc, char** argv)
 	glutReshapeFunc(reshape);
 
 	glutMouseFunc(mousePress);
+	glutMouseWheelFunc(mouseWheel);
 	glutKeyboardFunc(keyPress);
 
 	initGL();
