@@ -1,6 +1,6 @@
 ﻿#pragma once
 #define GLM_ENABLE_EXPERIMENTAL
-
+#include "./Planets/Planet.h"
 #include <GL/freeglut.h>
 #include <vector>
 #include <glm/vec3.hpp>
@@ -16,11 +16,13 @@ class SpaceShip {
 public:
     SpaceShip();
     ~SpaceShip();
-    void drawNebo() const;
     void draw() const;
 
     vec3 position{ 0.0f, 0.0f, 0.0f };
     vec3 baseColor{ 0.75f, 0.78f, 0.82f };
+    vec3 velocity{ 0,0,0 };
+    float mass = 1.0f;
+    void update(float dt, const vector<Planet*>& planets);
 
 private:
     void drawKupola() const;
@@ -32,6 +34,4 @@ private:
     void spojiKruznice(const vector<vec3>& prva, const vector<vec3>& druga) const;
     vector<vector<vec3>> kreirajTorus(float R, float r, int slicesMajor, int slicesMinor) const;
     vector<vector<vec3>> lopta;
-    vector<vector<vec3>> nebo;
-    vector<vec3> zvezde;
 };

@@ -21,9 +21,21 @@
     <ClCompile Include="src\Models\SpaceShip.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\Models\Nebo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Models\Planets\Planet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Models\SpaceShip.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Models\Nebo.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Models\Planets\Planet.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

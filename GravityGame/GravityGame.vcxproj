@@ -129,9 +129,13 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\Models\Nebo.cpp" />
+    <ClCompile Include="src\Models\Planets\Planet.cpp" />
     <ClCompile Include="src\Models\SpaceShip.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\Models\Nebo.h" />
+    <ClInclude Include="src\Models\Planets\Planet.h" />
     <ClInclude Include="src\Models\SpaceShip.h" />
   </ItemGroup>
   <ItemGroup>

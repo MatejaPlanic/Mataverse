@@ -19,18 +19,6 @@ static vector<vec3> operator*(mat4x4 mat, vector<vec3> vectors)
 SpaceShip::SpaceShip()
 {
     lopta = kreirajLoptu(0.2f, 64, 64);
-    nebo = kreirajLoptu(20.0f, 64, 64);
-
-    const int brojZvezda = 300;
-    zvezde.resize(brojZvezda);
-    for (int i = 0; i < brojZvezda; ++i) {
-        float fi = 2.0f * 3.14f * (rand() / (float)RAND_MAX);
-        float teta = 3.14f * (rand() / (float)RAND_MAX);
-        float r = 19.5f; 
-        zvezde[i].x = r * sin(teta) * cos(fi);
-        zvezde[i].y = r * sin(teta) * sin(fi);
-        zvezde[i].z = r * cos(teta);
-    }
 }
 
 SpaceShip::~SpaceShip() {}
@@ -114,17 +102,16 @@ void SpaceShip::drawKupola() const
 {
 	glPushMatrix();
     glScalef(1.0f, 0.5f, 1.0f);
-    float r = 0.1f, g = 0.1f, b = 0.1f;
 
     if (!lopta.empty())
         nacrtaj(GL_POLYGON, lopta[0]);
 
     int n = (int)lopta.size();
+    glColor3f(0.2f, 0.2f, 0.7f);
     for (int i = 1; i < n; i++)
     {
-        glColor3f(r, g, b);
+        
         spojiKruznice(lopta[i - 1], lopta[i]);
-        r += 0.001f; g += 0.001f; b += 0.001f;
     }
 	glPopMatrix();
 }
@@ -155,7 +142,7 @@ void SpaceShip::drawPrsten() const
     const int   N = 24;
     auto torus = kreirajTorus(R, r, M, N);
 
-    glColor3f(0.15f, 0.95f, 0.40f);
+    glColor3f(0.4f, 0.4f, 0.4f);
     for (int i = 1; i < M; ++i)
         spojiKruznice(torus[i - 1], torus[i]);
 
@@ -164,7 +151,7 @@ void SpaceShip::drawPrsten() const
     const int brojLampica = 12; 
     const float lampica_r = 0.015f;
 
-    glColor3f(1.0f, 0.0f, 0.0f);
+    glColor3f(0.0f, 0.0f, 1.0f);
 
     glPushMatrix();
     const float lampice_pozicija_R = R + (r/2);
@@ -189,26 +176,41 @@ void SpaceShip::drawPrsten() const
     glPopMatrix(); 
 }
 
-void SpaceShip::drawNebo() const
+void SpaceShip::update(float dt, const std::vector<Planet*>& planets)
 {
-    glDisable(GL_DEPTH_TEST);
-   
+    const float G = 1.0f;              
+    const float softening2 = 0.25f;       
+    const float maxAccel = 50.0f;        
+    const float linearDamping = 0.0f;     
 
-    glColor3f(0.0f, 0.0f, 0.0f); 
-    int n = (int)nebo.size();
-    for (int i = 1; i < n; i++)
+    glm::vec3 a(0.0f);
+    for (auto* p : planets)
     {
-        spojiKruznice(nebo[i - 1], nebo[i]);
+        glm::vec3 r = p->getPosition() - position; 
+        float dist2 = glm::dot(r, r) + softening2; 
+        float invDist = 1.0f / sqrtf(dist2);
+        float invDist3 = invDist * invDist * invDist;   
+        a += (G * p->getMass()) * r * invDist3;
     }
-    spojiKruznice(nebo[n - 1], nebo[0]);
 
-    glPointSize(2.0f);
-    glColor3f(1.0f, 1.0f, 1.0f);
-    glBegin(GL_POINTS);
-    for (const auto& zvezda : zvezde) {
-        glVertex3f(zvezda.x, zvezda.y, zvezda.z);
+    float aLen = glm::length(a);
+    if (aLen > maxAccel) a *= (maxAccel / aLen);
+
+    if (linearDamping > 0.0f) velocity *= (1.0f - linearDamping * dt);
+
+    velocity += a * dt;
+    position += velocity * dt;
+
+    for (auto* p : planets) {
+        glm::vec3 r = position - p->getPosition();
+        float d = glm::length(r);
+        if (d < p->getRadius()) {
+            glm::vec3 n = r / d;
+            position = p->getPosition() + n * p->getRadius();
+            velocity = glm::vec3(0); 
+        }
     }
-    glEnd();
 
-    glEnable(GL_DEPTH_TEST); 
 }
+
+

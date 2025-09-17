@@ -3,6 +3,9 @@
 #define GLM_ENABLE_EXPERIMENTAL
 
 #include "./Models/SpaceShip.h"
+#include "./Models/Nebo.h"
+#include "./Models/Planets/Planet.h"
+
 
 using namespace glm;
 using namespace std;
@@ -20,6 +23,9 @@ vec3 LookAt_vector(0.0, 0.0, 0.0);
 vec3 LookUp_vector(0.0, 1.0, 0.0);
 vector<vec3> coordinateSystem;
 SpaceShip ship;
+Nebo nebo;
+std::vector<Planet*> planets;
+
 const int circle_dots = 50;
 const float height = 480;
 const float ratio = 16.f / 9.f;
@@ -100,39 +106,34 @@ void display(void)
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 
-	gluPerspective(80.f, 16.f / 9.f, 0.1f, 50.f);
+	gluPerspective(80.0, 16.0 / 9.0, 0.1, 500.0);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
 	gluLookAt(
 		CameraPosition.x, CameraPosition.y, CameraPosition.z,
 		LookAt_vector.x, LookAt_vector.y, LookAt_vector.z,
 		LookUp_vector.x, LookUp_vector.y, LookUp_vector.z
 	);
-	drawCoordinates();
-	ship.drawNebo();
+	//drawCoordinates();
+	nebo.draw();
 	ship.draw();
+	for (auto& p : planets) p->draw();
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-
-	glDisable(GL_DEPTH_TEST);
-
-
-
-	glEnable(GL_DEPTH_TEST);
-
 	glutSwapBuffers();
 }
 
 void timer(int v)
 {
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	gluLookAt(
-		CameraPosition.x, CameraPosition.y, CameraPosition.z,
-		LookAt_vector.x, LookAt_vector.y, LookAt_vector.z,
-		LookUp_vector.x, LookUp_vector.y, LookUp_vector.z
-	);
+	static int lastMs = glutGet(GLUT_ELAPSED_TIME);
+	int nowMs = glutGet(GLUT_ELAPSED_TIME);
+	float dt = (nowMs - lastMs) / 1000.0f;
+	lastMs = nowMs;
 
+
+	ship.update(dt, planets);
 
 	glutTimerFunc(1000 / FPS, timer, v);
 	glutPostRedisplay();
@@ -195,11 +196,10 @@ void mouseWheel(int wheel, int direction, int x, int y)
 	{
 		cameraDistance = minDistance;
 	}
-	if (cameraDistance > maxDistance)
+	else if (cameraDistance > maxDistance)
 	{
 		cameraDistance = maxDistance;
 	}
-
 	vec3 viewDirection = normalize(CameraPosition - LookAt_vector);
 	CameraPosition = LookAt_vector + viewDirection * cameraDistance;
 
@@ -325,7 +325,7 @@ void SpeedDown()
 
 void initGL(void)
 {
-	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glShadeModel(GL_FLAT);
 	glEnable(GL_DEPTH_TEST);
 }
@@ -410,7 +410,10 @@ int main(int argc, char** argv)
 	glutInitWindowPosition(150, 50);
 	glutCreateWindow(title);
 	createCoordinates();
-
+	Planet planet(vec3(10, 0, 1), vec3(1, 1, 1), 3, 100);
+	Planet planet2(vec3(5, 0, 5), vec3(0.5, 0.5, 1), 2, 100);
+	planets.push_back(&planet);
+	planets.push_back(&planet2);
 	glutDisplayFunc(display);
 	glutTimerFunc(100, timer, 0);
 	glutReshapeFunc(reshape);
