@@ -5,6 +5,23 @@
 #include "./Models/SpaceShip.h"
 #include "./Models/Nebo.h"
 #include "./Models/Planets/Planet.h"
+#include "./Models/WormHole.h"
+#include <cmath>
+#include <glm/gtc/matrix_transform.hpp> 
+
+const float PLANET_DEPTH_STEP = 0.8f;
+const float PLANET_MIN_DEPTH = 0.0f;   
+const float PLANET_MAX_DEPTH = 120.0f; 
+
+Planet* selectedPlanet = nullptr;
+
+const glm::vec3 NEW_PLANET_COLOR(0.2f, 0.7f, 1.0f);
+const float     NEW_PLANET_RADIUS = 1.6f;
+const float     NEW_PLANET_MASS = 120.0f;
+const float NEW_PLANET_FORWARD = 10.0f;
+
+
+bool placingPlanet = false;
 
 
 using namespace glm;
@@ -25,7 +42,8 @@ vector<vec3> coordinateSystem;
 SpaceShip ship;
 Nebo nebo;
 std::vector<Planet*> planets;
-
+//WormHole(vec3 pos, float rad,float mass, int brojPrstenova, float rastojanjePrstenova);
+WormHole wormhole(vec3(0.0f, 0.0f, 0.0f), 2.0f, 1.0f, 10, 0.2f);
 const int circle_dots = 50;
 const float height = 480;
 const float ratio = 16.f / 9.f;
@@ -36,6 +54,7 @@ float cameraDistance = 3.0f;
 const float minDistance = 1.0f;
 const float maxDistance = 10.0f;
 const float zoomStep = 0.5f;
+int winW = int(height * ratio), winH = int(height);
 
 vec3 operator* (mat4x4 mat, vec3 vec)
 {
@@ -95,6 +114,76 @@ void drawCoordinates()
 	glEnd();
 }
 
+static void hudCircleGeometry(float& panelH, float& cx, float& cy, float& rad)
+{
+	const float pad = 16.0f;
+	rad = 12.0f;
+	panelH = winH * 0.25f;
+	cx = pad + rad;
+	cy = panelH - pad - rad; 
+}
+
+static void drawFilledCircle2D(float cx, float cy, float r, int segments = 48)
+{
+	glBegin(GL_TRIANGLE_FAN);
+	glVertex2f(cx, cy);
+	for (int i = 0; i <= segments; ++i) {
+		float a = (2.0f * 3.14159265f * i) / segments;
+		glVertex2f(cx + std::cos(a) * r, cy + std::sin(a) * r);
+	}
+	glEnd();
+}
+
+static void screenToWorldRay(int mx, int myBL, glm::vec3& orig, glm::vec3& dir)
+{
+	float nx = 2.0f * mx / float(winW) - 1.0f;
+	float ny = 2.0f * myBL / float(winH) - 1.0f;
+
+	mat4 P = glm::perspective(glm::radians(80.0f), float(winW) / float(winH), 0.1f, 500.0f);
+	mat4 V = glm::lookAt(CameraPosition, LookAt_vector, LookUp_vector);
+	mat4 invPV = glm::inverse(P * V);
+
+	vec4 startNDC(nx, ny, -1.0f, 1.0f);
+	vec4 endNDC(nx, ny, 1.0f, 1.0f);
+
+	vec4 startW = invPV * startNDC; startW /= startW.w;
+	vec4 endW = invPV * endNDC;   endW /= endW.w;
+
+	orig = vec3(startW);
+	dir = normalize(glm::vec3(endW - startW));
+}
+
+void drawHUD()
+{
+	glDisable(GL_DEPTH_TEST);
+	glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); glOrtho(0, winW, 0, winH, -1, 1);
+	glMatrixMode(GL_MODELVIEW);  glPushMatrix(); glLoadIdentity();
+
+	float panelH, cx, cy, rad; hudCircleGeometry(panelH, cx, cy, rad);
+
+	glColor4f(0.12f, 0.12f, 0.12f, 0.85f);
+	glBegin(GL_QUADS);
+	glVertex2f(0, 0); glVertex2f(winW, 0); glVertex2f(winW, panelH); glVertex2f(0, panelH);
+	glEnd();
+
+	glColor3f(0.2f, 0.6f, 1.0f);
+	drawFilledCircle2D(cx, cy, rad, 48);
+
+	glColor3f(1, 1, 1);
+	float textX = cx + rad + 10.0f;
+	float textY = panelH - 16.0f - 6.0f;
+	char buf[128];
+	sprintf_s(buf, "poluprecnik = %.2f\nmasa = %.2f%s",
+		1.60,120.00, placingPlanet ? "\n[klik na scenu za postavljanje]" : "");
+	glRasterPos2f(textX, textY);
+	glutBitmapString(GLUT_BITMAP_HELVETICA_18, (const unsigned char*)buf);
+
+	glPopMatrix(); // MODELVIEW
+	glMatrixMode(GL_PROJECTION); glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+	glEnable(GL_DEPTH_TEST);
+}
+
 
 
 void display(void)
@@ -117,7 +206,9 @@ void display(void)
 	//drawCoordinates();
 	nebo.draw();
 	ship.draw();
+	/*wormhole.draw();*/
 	for (auto& p : planets) p->draw();
+	drawHUD();
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	glMatrixMode(GL_PROJECTION);
@@ -139,13 +230,14 @@ void timer(int v)
 	glutPostRedisplay();
 }
 
-void reshape(GLsizei width, GLsizei height)
+void reshape(GLsizei width, GLsizei heightIn)
 {
-	if (height * ratio <= width)
-		width = ratio * height;
+	if (heightIn * ratio <= width)
+		width = ratio * heightIn;
 	else
-		height = width / ratio;
-	glViewport(0, 0, width, height);
+		heightIn = width / ratio;
+	glViewport(0, 0, width, heightIn);
+	winW = width; winH = heightIn;
 }
 
 void PrintVector(vec3 vec)
@@ -181,30 +273,48 @@ void MoveBackward()
 	CameraPosition = mt * CameraPosition;
 }
 
+static void nudgeSelectedPlanetDepth(int wheelDirection)
+{
+	if (!selectedPlanet) return;
+
+	glm::vec3 fwd = glm::normalize(LookAt_vector - CameraPosition);
+
+	glm::vec3 pos = selectedPlanet->getPosition();
+	float currDepth = glm::dot(pos - CameraPosition, fwd);
+	glm::vec3 lateral = pos - (CameraPosition + fwd * currDepth);
+
+	float delta = (wheelDirection > 0 ? -PLANET_DEPTH_STEP : PLANET_DEPTH_STEP);
+
+	float newDepth = currDepth + delta;
+	newDepth = std::max(PLANET_MIN_DEPTH, std::min(PLANET_MAX_DEPTH, newDepth));
+
+	glm::vec3 newPos = CameraPosition + fwd * newDepth + lateral;
+	selectedPlanet->setPosition(newPos);
+}
+
 void mouseWheel(int wheel, int direction, int x, int y)
 {
-	if (direction > 0)
-	{
-		cameraDistance -= zoomStep;
-	}
-	else
-	{
-		cameraDistance += zoomStep;
+	int mods = glutGetModifiers();
+	bool shiftHeld = (mods & GLUT_ACTIVE_SHIFT);
+
+	if (shiftHeld && selectedPlanet) {
+		nudgeSelectedPlanetDepth(direction);
+		glutPostRedisplay();
+		return;
 	}
 
-	if (cameraDistance < minDistance)
-	{
-		cameraDistance = minDistance;
-	}
-	else if (cameraDistance > maxDistance)
-	{
-		cameraDistance = maxDistance;
-	}
+	if (direction > 0) cameraDistance -= zoomStep;
+	else               cameraDistance += zoomStep;
+
+	if (cameraDistance < minDistance) cameraDistance = minDistance;
+	else if (cameraDistance > maxDistance) cameraDistance = maxDistance;
+
 	vec3 viewDirection = normalize(CameraPosition - LookAt_vector);
 	CameraPosition = LookAt_vector + viewDirection * cameraDistance;
 
 	glutPostRedisplay();
 }
+
 
 void MoveLeft()
 {
@@ -305,7 +415,6 @@ void TurnDown()
 		mt = mt2 * mtr * mt1;
 
 		LookAt_vector = mt * LookAt_vector;
-		// LookUp_vector = mt * LookUp_vector;
 
 		upDownAngle -= ROTATION_CONST;
 	}
@@ -325,31 +434,90 @@ void SpeedDown()
 
 void initGL(void)
 {
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClearColor(0, 0, 0, 1);
 	glShadeModel(GL_FLAT);
 	glEnable(GL_DEPTH_TEST);
+
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
+
+static bool raySphereHit(const glm::vec3& ro, const glm::vec3& rd,
+	const glm::vec3& C, float R, float& tHit)
+{
+
+	glm::vec3 oc = ro - C;
+	float b = 2.0f * glm::dot(oc, rd);
+	float c = glm::dot(oc, oc) - R * R;
+	float D = b * b - 4.0f * c;    
+	if (D < 0.0f) return false;
+	float sD = std::sqrt(D);
+	float t0 = (-b - sD) * 0.5f;
+	float t1 = (-b + sD) * 0.5f;
+	float t = t0;
+	if (t < 0.0f) t = t1;
+	if (t < 0.0f) return false;
+	tHit = t;
+	return true;
+}
+
+static Planet* pickPlanetAt(int mx, int myBL)
+{
+	glm::vec3 ro, rd;
+	screenToWorldRay(mx, myBL, ro, rd);
+
+	Planet* best = nullptr;
+	float bestT = 1e9f;
+
+	for (auto* p : planets) {
+		float tHit;
+		if (raySphereHit(ro, rd, p->getPosition(), p->getRadius(), tHit)) {
+			if (tHit < bestT) { bestT = tHit; best = p; }
+		}
+	}
+	return best;
+}
+
+
+
 
 void mousePress(int button, int state, int x, int y)
 {
-	switch (button)
-	{
-	case GLUT_LEFT_BUTTON:
-		if (state == GLUT_DOWN)
-		{
-			//FUNKCIJA
-		}
-		break;
-	case GLUT_RIGHT_BUTTON:
-		if (state == GLUT_DOWN)
-		{
-			//FUNKCIJA
-		}
-		break;
-	default:
-		break;
+	if (button != GLUT_LEFT_BUTTON || state != GLUT_DOWN) return;
+
+	int yBL = winH - y;
+
+	float panelH, cx, cy, rad; hudCircleGeometry(panelH, cx, cy, rad);
+
+	float dx = x - cx;
+	float dy = yBL - cy;
+	if ((dx * dx + dy * dy) <= rad * rad) {
+		placingPlanet = !placingPlanet;
+		if (placingPlanet) selectedPlanet = nullptr;
+		glutPostRedisplay();
+		return;
 	}
+
+	if (placingPlanet) {
+		if (yBL <= panelH) return; 
+
+		glm::vec3 ro, rd;
+		screenToWorldRay(x, yBL, ro, rd);
+
+		glm::vec3 pos = CameraPosition + rd * NEW_PLANET_FORWARD;
+
+		Planet* np = new Planet(pos, NEW_PLANET_COLOR, NEW_PLANET_RADIUS, NEW_PLANET_MASS);
+		planets.push_back(np);
+
+		placingPlanet = false;  
+		selectedPlanet = np;
+		glutPostRedisplay();
+		return;
+	}
+	selectedPlanet = pickPlanetAt(x, yBL);
+	glutPostRedisplay();
 }
+
 
 void keyPress(unsigned char key, int x, int y)
 {
@@ -410,10 +578,6 @@ int main(int argc, char** argv)
 	glutInitWindowPosition(150, 50);
 	glutCreateWindow(title);
 	createCoordinates();
-	Planet planet(vec3(10, 0, 1), vec3(1, 1, 1), 3, 100);
-	Planet planet2(vec3(5, 0, 5), vec3(0.5, 0.5, 1), 2, 100);
-	planets.push_back(&planet);
-	planets.push_back(&planet2);
 	glutDisplayFunc(display);
 	glutTimerFunc(100, timer, 0);
 	glutReshapeFunc(reshape);

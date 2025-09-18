@@ -15,14 +15,11 @@ static vector<vec3> operator*(mat4x4 mat, vector<vec3> vectors)
 	return vectors;
 }
 
-Planet::Planet(vec3 pos, vec3 col, float rad, float mas) {
-	position = pos;
-	color = col;
-	radius = rad;
-	mass = mas;
+Planet::Planet(vec3 pos, vec3 col, float rad, float mas) : NebeskoTelo(pos, rad, mas), color(col) {
+
 	lopta = kreirajLoptu(rad, 64, 64);
 
-	dodajKratere(1.0f);
+	dodajKratere(0.7f);
 }
 
 Planet::~Planet() {}
@@ -127,7 +124,7 @@ void Planet::dodajKratere(float udubljenje) {
 		centar_kratera.x = radius * sin(teta_kratera) * cos(fi_kratera);
 		centar_kratera.y = radius * sin(teta_kratera) * sin(fi_kratera);
 		centar_kratera.z = radius * cos(teta_kratera);
-		const float radijus_kratera = 1.0f;
+		const float radijus_kratera = 0.7f;
 
 		Krater kr{ centar_kratera, radijus_kratera, udubljenje };
 		kratere.push_back(kr);

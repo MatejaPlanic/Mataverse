@@ -9,19 +9,17 @@
 #include <glm/gtx/transform.hpp>
 #include <glm/gtx/rotate_vector.hpp>
 #include <glm/gtc/constants.hpp>
+#include "../NebeskoTelo.h"
 using namespace glm;
 using namespace std;
 
-class Planet {
+class Planet: public NebeskoTelo{
 public:
     Planet(vec3 pos, vec3 col, float rad, float mas);
     ~Planet();
 
-    void draw() const;
+    void draw() const override;
     void dodajKratere(float udubljenje);
-    const glm::vec3& getPosition() const { return position; }
-    float getMass() const { return mass; }
-    float getRadius() const { return radius; }
 
 private:
     struct Krater {
@@ -30,8 +28,7 @@ private:
         float depth;
     };
 
-    vec3 position, color;
-    float radius, mass;
+    vec3 color;
 
     vector<vector<vec3>> lopta;
     vector<Krater> kratere;          

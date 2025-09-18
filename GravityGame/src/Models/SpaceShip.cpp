@@ -181,7 +181,6 @@ void SpaceShip::update(float dt, const std::vector<Planet*>& planets)
     const float G = 1.0f;              
     const float softening2 = 0.25f;       
     const float maxAccel = 50.0f;        
-    const float linearDamping = 0.0f;     
 
     glm::vec3 a(0.0f);
     for (auto* p : planets)
@@ -196,7 +195,6 @@ void SpaceShip::update(float dt, const std::vector<Planet*>& planets)
     float aLen = glm::length(a);
     if (aLen > maxAccel) a *= (maxAccel / aLen);
 
-    if (linearDamping > 0.0f) velocity *= (1.0f - linearDamping * dt);
 
     velocity += a * dt;
     position += velocity * dt;

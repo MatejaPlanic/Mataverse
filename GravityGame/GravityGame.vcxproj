@@ -129,14 +129,18 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\Models\NebeskoTelo.cpp" />
     <ClCompile Include="src\Models\Nebo.cpp" />
     <ClCompile Include="src\Models\Planets\Planet.cpp" />
     <ClCompile Include="src\Models\SpaceShip.cpp" />
+    <ClCompile Include="src\Models\WormHole.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\Models\NebeskoTelo.h" />
     <ClInclude Include="src\Models\Nebo.h" />
     <ClInclude Include="src\Models\Planets\Planet.h" />
     <ClInclude Include="src\Models\SpaceShip.h" />
+    <ClInclude Include="src\Models\WormHole.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
