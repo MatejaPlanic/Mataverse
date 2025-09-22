@@ -54,4 +54,11 @@
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="src\Levels\Level1.txt" />
+    <Text Include="src\Levels\Level2.txt" />
+    <Text Include="src\Levels\Level3.txt" />
+    <Text Include="src\Levels\Level4.txt" />
+    <Text Include="src\Levels\Level5.txt" />
+  </ItemGroup>
 </Project>

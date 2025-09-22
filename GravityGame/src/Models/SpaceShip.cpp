@@ -1,4 +1,6 @@
 ﻿#include "SpaceShip.h"
+#include "WormHole.h"
+
 using namespace glm;
 using namespace std;
 
@@ -176,7 +178,7 @@ void SpaceShip::drawPrsten() const
     glPopMatrix(); 
 }
 
-void SpaceShip::update(float dt, const std::vector<Planet*>& planets)
+void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const WormHole* wormhole)
 {
     const float G = 1.0f;              
     const float softening2 = 0.25f;       
@@ -195,11 +197,42 @@ void SpaceShip::update(float dt, const std::vector<Planet*>& planets)
     float aLen = glm::length(a);
     if (aLen > maxAccel) a *= (maxAccel / aLen);
 
+    if (wormhole)
+    {
+        glm::vec3 rw = wormhole->getPosition() - position;
+        float dw = glm::length(rw);
+        float R = wormhole->getRadius();
+
+        const float outer = 3.0f * R;   
+        const float inner = 0.60f * R;  
+        if (dw < outer)
+        {
+            glm::vec3 dir = rw / dw; 
+
+            float t = 1.0f - glm::clamp((dw - inner) / (outer - inner), 0.0f, 1.0f);
+
+            float suctionAccel = 120.0f * (0.2f + 0.8f * t); 
+
+            a += dir * suctionAccel;
+        }
+
+        if (dw < inner)
+        {
+            position = wormhole->getPosition();
+            velocity = glm::vec3(0.0f);
+			shipCaptured = true;
+        }
+    }
+
+    const float maxAccelWithSuction = 150.0f;
+    aLen = glm::length(a);
+    if (aLen > maxAccelWithSuction) a *= (maxAccelWithSuction / aLen);
 
     velocity += a * dt;
     position += velocity * dt;
 
     for (auto* p : planets) {
+        
         glm::vec3 r = position - p->getPosition();
         float d = glm::length(r);
         if (d < p->getRadius()) {

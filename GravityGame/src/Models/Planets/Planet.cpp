@@ -17,7 +17,7 @@ static vector<vec3> operator*(mat4x4 mat, vector<vec3> vectors)
 
 Planet::Planet(vec3 pos, vec3 col, float rad, float mas) : NebeskoTelo(pos, rad, mas), color(col) {
 
-	lopta = kreirajLoptu(rad, 64, 64);
+	lopta = kreirajLoptu(rad, 32, 32);
 
 	dodajKratere(0.7f);
 }
