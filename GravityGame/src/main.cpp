@@ -75,15 +75,15 @@ static inline std::string trim(const std::string& s) {
 }
 
 static bool parseColor(const std::string& csv, glm::vec3& out) {
-	std::istringstream ss(csv);
-	std::string tok;
+	istringstream ss(csv);
+	string tok;
 	float vals[3]; int i = 0;
 	while (std::getline(ss, tok, ',')) {
 		if (i >= 3) break;
 		vals[i++] = std::stof(trim(tok));
 	}
 	if (i != 3) return false;
-	out = glm::vec3(vals[0], vals[1], vals[2]);
+	out = vec3(vals[0], vals[1], vals[2]);
 	return true;
 }
 
@@ -160,13 +160,6 @@ bool loadLevelConfig(const std::string& path) {
 	g_placedThisLevel = 0;
 
 	g_wormhole = new WormHole(whPos, whRadius, whMass, whRings, whSpacing);
-	printf("[LEVEL] Wormhole @ (%.2f, %.2f, %.2f), R=%.2f, M=%.2f, rings=%d, spacing=%.2f\n",
-		whPos.x, whPos.y, whPos.z, whRadius, whMass, whRings, whSpacing);
-
-	printf("[LEVEL] Učitan level (max planets=%d, color=%.2f,%.2f,%.2f, R=%.2f, M=%.2f, F=%.2f)\n",
-		g_maxPlaceablePlanets,
-		g_newPlanetColor.r, g_newPlanetColor.g, g_newPlanetColor.b,
-		g_newPlanetRadius, g_newPlanetMass, g_newPlanetForward);
 
 	return true;
 }
@@ -267,8 +260,10 @@ static void screenToWorldRay(int mx, int myBL, glm::vec3& orig, glm::vec3& dir)
 	vec4 startNDC(nx, ny, -1.0f, 1.0f);
 	vec4 endNDC(nx, ny, 1.0f, 1.0f);
 
-	vec4 startW = invPV * startNDC; startW /= startW.w;
-	vec4 endW = invPV * endNDC;   endW /= endW.w;
+	vec4 startW = invPV * startNDC; 
+	startW /= startW.w;
+	vec4 endW = invPV * endNDC;   
+	endW /= endW.w;
 
 	orig = vec3(startW);
 	dir = normalize(glm::vec3(endW - startW));
@@ -363,6 +358,54 @@ void display(void)
 	glutSwapBuffers();
 }
 
+
+static int g_currentLevelIndex = 1;
+
+static int parseLevelIndexFromPath(const std::string& path) {
+	size_t L = path.rfind("Level");
+	if (L == string::npos) return 1;
+	size_t dot = path.rfind(".txt");
+	if (dot == string::npos || dot <= L + 5) return 1;
+	string num = path.substr(L + 5, dot - (L + 5));
+	try { return std::max(1, std::stoi(num)); }
+	catch (...) { return 1; }
+}
+
+static std::string makeLevelPath(int idx) {
+	char buf[128];
+	snprintf(buf, sizeof(buf), "src/Levels/Level%d.txt", idx);
+	return string(buf);
+}
+
+static bool fileExists(const std::string& p) {
+	std::ifstream f(p);
+	return (bool)f;
+}
+
+static void gotoLevel(int idx) {
+	if (idx < 1) idx = 1;
+	string p = makeLevelPath(idx);
+	if (!fileExists(p)) {
+		std::printf("[LEVEL] Level%d ne postoji (%s). Vracam na Level1.\n", idx, p.c_str());
+		idx = 1;
+		p = makeLevelPath(1);
+	}
+	g_currentLevelIndex = idx;
+	g_currentLevelPath = p;
+	stopAndReset();
+}
+
+static void advanceToNextLevel() {
+	int next = g_currentLevelIndex + 1;
+	std::string np = makeLevelPath(next);
+	if (!fileExists(np)) {
+		std::printf("[LEVEL] Naredni Level%d ne postoji. Vracam na Level1.\n", next);
+		next = 1;
+	}
+	std::printf("[GAME] Level kompletiran! Prelazim na Level%d...\n", next);
+	gotoLevel(next);
+}
+
 void timer(int v)
 {
 	static int lastMs = glutGet(GLUT_ELAPSED_TIME);
@@ -374,9 +417,7 @@ void timer(int v)
 		ship.update(dt, planets,g_wormhole);
 		if (ship.shipCaptured)
 		{
-			simulationActive = false;
-			stopAndReset();
-			printf("[GAME] Brod je uspešno stigao do crvotočine! Čestitamo!\n");
+			advanceToNextLevel();
 		}
 	}
 
@@ -736,6 +777,23 @@ void mousePress(int button, int state, int x, int y)
 }
 
 
+static bool deletePlanet(Planet* target)
+{
+	if (!target) return false;
+
+	auto it = std::find(planets.begin(), planets.end(), target);
+	if (it != planets.end()) {
+		delete* it;
+		planets.erase(it);
+
+		if (g_placedThisLevel > 0) g_placedThisLevel--;
+
+		if (selectedPlanet == target) selectedPlanet = nullptr;
+		return true;
+	}
+	return false;
+}
+
 void keyPress(unsigned char key, int x, int y)
 {
 
@@ -765,6 +823,12 @@ void keyPress(unsigned char key, int x, int y)
 	case 'j':
 
 		SpeedDown();
+		break;
+	case 'x':
+		if (simulationActive) return;
+		if (deletePlanet(selectedPlanet)) {
+			glutPostRedisplay();
+		}
 		break;
 	case 52:
 
@@ -813,6 +877,7 @@ int main(int argc, char** argv)
 
 	initGL();
 	loadLevelConfig(g_currentLevelPath);
+	g_currentLevelIndex = parseLevelIndexFromPath(g_currentLevelPath);
 	glutMainLoop();
 
 	return 0;
