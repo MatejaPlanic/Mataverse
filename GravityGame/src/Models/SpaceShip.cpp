@@ -1,5 +1,9 @@
 ﻿#include "SpaceShip.h"
 #include "WormHole.h"
+#include "Satelit.h" 
+#include <unordered_map>
+
+static std::unordered_map<const Planet*, float> g_jamTimers;
 
 using namespace glm;
 using namespace std;
@@ -16,6 +20,37 @@ static vector<vec3> operator*(mat4x4 mat, vector<vec3> vectors)
     for (int i = 0; i < (int)vectors.size(); i++)
         vectors[i] = mat * vectors[i];
     return vectors;
+}
+
+static bool planetJammed(const Planet* p, const Satelit* sat, float dt)
+{
+    if (!sat || !p) return false;
+
+    const float coneDeg = 22.0f;
+    const float range = 20.0f;
+    const float cosHalf = std::cos(glm::radians(coneDeg * 0.5f));
+
+    glm::vec3 S = sat->getPosition();
+    glm::vec3 F = glm::normalize(sat->forward());
+    glm::vec3 to = p->getPosition() - S;
+    float dist = glm::length(to);
+
+    if (dist > 0.0f && dist <= range) {
+        glm::vec3 dir = to / dist;
+        float cosang = glm::dot(F, dir);
+        if (cosang >= cosHalf) {
+            g_jamTimers[p] = 2.0f;
+        }
+    }
+
+    auto it = g_jamTimers.find(p);
+    if (it != g_jamTimers.end()) {
+        it->second -= dt;
+        if (it->second > 0.0f) return true; 
+        else g_jamTimers.erase(it);         
+    }
+
+    return false;
 }
 
 SpaceShip::SpaceShip()
@@ -178,20 +213,25 @@ void SpaceShip::drawPrsten() const
     glPopMatrix(); 
 }
 
-void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const WormHole* wormhole)
+void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const WormHole* wormhole, const Satelit* sat)
 {
     const float G = 1.0f;              
     const float softening2 = 0.25f;       
     const float maxAccel = 50.0f;        
 
-    glm::vec3 a(0.0f);
+    vec3 a(0.0f);
     for (auto* p : planets)
     {
-        glm::vec3 r = p->getPosition() - position; 
+        vec3 r = p->getPosition() - position; 
         float dist2 = glm::dot(r, r) + softening2; 
         float invDist = 1.0f / sqrtf(dist2);
         float invDist3 = invDist * invDist * invDist;   
-        a += (G * p->getMass()) * r * invDist3;
+        float mass = p->getMass();
+
+        if (planetJammed(p, sat, dt)) {
+            mass = 0.0f;
+        }
+        a += (G * mass) * r * invDist3;
     }
 
     float aLen = glm::length(a);
@@ -199,7 +239,7 @@ void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const Worm
 
     if (wormhole)
     {
-        glm::vec3 rw = wormhole->getPosition() - position;
+        vec3 rw = wormhole->getPosition() - position;
         float dw = glm::length(rw);
         float R = wormhole->getRadius();
 
@@ -207,9 +247,9 @@ void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const Worm
         const float inner = 0.60f * R;  
         if (dw < outer)
         {
-            glm::vec3 dir = rw / dw; 
+            vec3 dir = rw / dw; 
 
-            float t = 1.0f - glm::clamp((dw - inner) / (outer - inner), 0.0f, 1.0f);
+            float t = 1.0f - clamp((dw - inner) / (outer - inner), 0.0f, 1.0f);
 
             float suctionAccel = 120.0f * (0.2f + 0.8f * t); 
 
@@ -219,7 +259,7 @@ void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const Worm
         if (dw < inner)
         {
             position = wormhole->getPosition();
-            velocity = glm::vec3(0.0f);
+            velocity = vec3(0.0f);
 			shipCaptured = true;
         }
     }

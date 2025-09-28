@@ -11,6 +11,8 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include "./Models/Satelit.h"
+
 
 using namespace glm;
 using namespace std;
@@ -20,6 +22,12 @@ const float PLANET_MIN_DEPTH = 0.0f;
 const float PLANET_MAX_DEPTH = 120.0f; 
 
 Planet* selectedPlanet = nullptr;
+
+bool  g_orbiting = false;
+int   g_lastX = 0;
+float g_orbitAngle = 0.0f;     
+float g_orbitRadius = 3.0f;    
+float g_camHeight = 1.0f;
 
 string g_currentLevelPath = "src/Levels/Level1.txt";
 int   g_maxPlaceablePlanets = 0;     
@@ -31,7 +39,7 @@ float     g_newPlanetMass = 120.0f;
 float     g_newPlanetForward = 10.0f;
 
 WormHole* g_wormhole = nullptr;
-
+Satelit* g_sat = nullptr;
 
 bool placingPlanet = false;
 
@@ -44,7 +52,7 @@ bool placingPlanet = false;
 
 /*--------------------------------------------------*/
 
-char title[] = "Prozor";
+char title[] = "Mataverse";
 int FPS = 60;
 vec3 CameraPosition(1.0, 1.0, 1.0);
 vec3 LookAt_vector(0.0, 0.0, 0.0);
@@ -87,6 +95,20 @@ static bool parseColor(const std::string& csv, glm::vec3& out) {
 	return true;
 }
 
+static void initOrbitFromCurrent() {
+	glm::vec3 d = CameraPosition - LookAt_vector;
+	g_camHeight = CameraPosition.y;
+	g_orbitRadius = glm::length(glm::vec2(d.x, d.z));
+	g_orbitAngle = std::atan2(d.x, d.z);
+}
+
+static void updateOrbitPos() {
+	CameraPosition.x = LookAt_vector.x + g_orbitRadius * std::sin(g_orbitAngle);
+	CameraPosition.z = LookAt_vector.z + g_orbitRadius * std::cos(g_orbitAngle);
+	CameraPosition.y = g_camHeight;
+	LookUp_vector = glm::vec3(0, 1, 0);
+}
+
 bool loadLevelConfig(const std::string& path) {
 	std::ifstream f(path);
 	if (!f) {
@@ -105,6 +127,12 @@ bool loadLevelConfig(const std::string& path) {
 	float whMass = 1.0f;
 	int   whRings = 10;
 	float whSpacing = 0.2f;
+	vec3  satPos = vec3(0.0f, 1.2f, -4.0f);
+	vec3  satBodyColor = vec3(0.75f, 0.8f, 0.9f);
+	vec3  satPanelCol = vec3(0.15f, 0.5f, 1.0f);
+	float satScale = 1.2f;
+	float satRotY = 0.0f;
+	int satEnabled = 0;
 
 	std::string line;
 	while (std::getline(f, line)) {
@@ -149,6 +177,24 @@ bool loadLevelConfig(const std::string& path) {
 		else if (key == "WORMHOLE_RING_SPACING") {
 			whSpacing = std::stof(val);
 		}
+		else if (key == "SATELLITE_POS") {          
+			parseColor(val, satPos);                 
+		}
+		else if (key == "SATELLITE_BODY_COLOR") {  
+			parseColor(val, satBodyColor);
+		}
+		else if (key == "SATELLITE_PANEL_COLOR") {
+			parseColor(val, satPanelCol);
+		}
+		else if (key == "SATELLITE_SCALE") {
+			satScale = std::stof(val);
+		}
+		else if (key == "SATELLITE_ROT_Y") {
+			satRotY = std::stof(val);
+		}
+		else if (key == "SATELLITE_ENABLED") {
+			satEnabled = std::stoi(val);
+		}
 	}
 
 	g_maxPlaceablePlanets = std::max(0, available);
@@ -161,6 +207,12 @@ bool loadLevelConfig(const std::string& path) {
 
 	g_wormhole = new WormHole(whPos, whRadius, whMass, whRings, whSpacing);
 
+	if (satEnabled) {
+		g_sat = new Satelit(satPos, satBodyColor);
+		g_sat->setPanelColor(satPanelCol);
+		g_sat->setScale(satScale);
+		g_sat->setRotationY(satRotY);
+	}
 	return true;
 }
 
@@ -200,6 +252,7 @@ static void stopAndReset() {
 	ship = SpaceShip();
 
 	if (g_wormhole) { delete g_wormhole; g_wormhole = nullptr; }
+	if (g_sat) { delete g_sat; g_sat = nullptr; }
 	loadLevelConfig(g_currentLevelPath);
 }
 
@@ -348,6 +401,7 @@ void display(void)
 	);
 	nebo.draw();
 	ship.draw();
+	if (g_sat) { g_sat->addSpin(0.2f); g_sat->draw(); }
 	if (g_wormhole) g_wormhole->draw();
 	for (auto& p : planets) p->draw();
 	drawHUD();
@@ -414,7 +468,7 @@ void timer(int v)
 	lastMs = nowMs;
 
 	if (simulationActive) {
-		ship.update(dt, planets,g_wormhole);
+		ship.update(dt, planets,g_wormhole,g_sat);
 		if (ship.shipCaptured)
 		{
 			advanceToNextLevel();
@@ -716,6 +770,17 @@ static Planet* pickPlanetAt(int mx, int myBL)
 
 void mousePress(int button, int state, int x, int y)
 {
+	if (button == GLUT_RIGHT_BUTTON) {
+		if (state == GLUT_DOWN) {
+			g_orbiting = true;
+			g_lastX = x;
+			initOrbitFromCurrent();     
+		}
+		else {
+			g_orbiting = false;
+		}
+		return; 
+	}
 	if (button != GLUT_LEFT_BUTTON || state != GLUT_DOWN) return;
 
 	int yBL = winH - y;
@@ -776,6 +841,16 @@ void mousePress(int button, int state, int x, int y)
 	glutPostRedisplay();
 }
 
+void mouseMotion(int x, int y) {
+	if (!g_orbiting) return;
+	int dx = x - g_lastX;
+	g_lastX = x;
+
+	const float sens = 0.01f;   
+	g_orbitAngle += dx * sens;
+	updateOrbitPos();
+	glutPostRedisplay();
+}
 
 static bool deletePlanet(Planet* target)
 {
@@ -861,12 +936,12 @@ void keyPress(unsigned char key, int x, int y)
 int main(int argc, char** argv)
 {
 	glutInit(&argc, argv);
-
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_STENCIL);
 	glutInitWindowSize(height * ratio, height);
 	glutInitWindowPosition(150, 50);
 	glutCreateWindow(title);
 	glutDisplayFunc(display);
+	initOrbitFromCurrent();
 	glutTimerFunc(100, timer, 0);
 	glutReshapeFunc(reshape);
 
@@ -874,6 +949,7 @@ int main(int argc, char** argv)
 	glutMouseWheelFunc(mouseWheel);
 	glutKeyboardFunc(keyPress);
 	glutSpecialFunc(specialKeyPress);
+	glutMotionFunc(mouseMotion);
 
 	initGL();
 	loadLevelConfig(g_currentLevelPath);

@@ -13,6 +13,8 @@ using namespace glm;
 using namespace std;
 
 class WormHole;
+class Satelit;
+
 
 class SpaceShip {
 public:
@@ -24,7 +26,7 @@ public:
     vec3 baseColor{ 0.75f, 0.78f, 0.82f };
     vec3 velocity{ 0,0,0 };
     float mass = 1.0f;
-    void update(float dt, const vector<Planet*>& planets, const WormHole* wormhole);
+    void update(float dt, const vector<Planet*>& planets, const WormHole* wormhole, const Satelit* sat = nullptr);
 	bool shipCaptured = false;
 
 private:
