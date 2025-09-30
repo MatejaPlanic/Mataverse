@@ -29,7 +29,7 @@ float g_orbitAngle = 0.0f;
 float g_orbitRadius = 3.0f;    
 float g_camHeight = 1.0f;
 
-string g_currentLevelPath = "src/Levels/Level1.txt";
+string g_currentLevelPath = "src/Levels/Level2.txt";
 int   g_maxPlaceablePlanets = 0;     
 int   g_placedThisLevel = 0;     
 
@@ -40,17 +40,14 @@ float     g_newPlanetForward = 10.0f;
 
 WormHole* g_wormhole = nullptr;
 Satelit* g_sat = nullptr;
+Satelit* g_sat2 = nullptr;
+Planet* g_planetPlaced = nullptr;
 
 bool placingPlanet = false;
-
-
-
 
 #define MOVING_CONST 0.1
 #define ROTATION_CONST 3.14f / 180.f
 #define LOOK_MOVEMENT_CONST 0.1f
-
-/*--------------------------------------------------*/
 
 char title[] = "Mataverse";
 int FPS = 60;
@@ -134,6 +131,20 @@ bool loadLevelConfig(const std::string& path) {
 	float satRotY = 0.0f;
 	int satEnabled = 0;
 
+	int sat2Enabled = 0;
+	vec3  satPos2 = vec3(0.0f, 1.2f, -4.0f);
+	vec3  satBodyColor2 = vec3(0.75f, 0.8f, 0.9f);
+	vec3  satPanelCol2 = vec3(0.15f, 0.5f, 1.0f);
+	float satScale2 = 1.2f;
+	float satRotY2 = 0.0f;
+
+
+	vec3 colorPlaced = g_newPlanetColor;
+	float radPlaced = g_newPlanetRadius;
+	float massPlaced = g_newPlanetMass;
+	int placedEnabled = 0;
+	vec3 posPlaced = glm::vec3(0.0f, 0.0f, 0.0f);
+
 	std::string line;
 	while (std::getline(f, line)) {
 		line = trim(line);
@@ -195,6 +206,42 @@ bool loadLevelConfig(const std::string& path) {
 		else if (key == "SATELLITE_ENABLED") {
 			satEnabled = std::stoi(val);
 		}
+
+		else if (key == "SATELLITE2_POS") {
+			parseColor(val, satPos);
+		}
+		else if (key == "SATELLITE2_BODY_COLOR") {
+			parseColor(val, satBodyColor2);
+		}
+		else if (key == "SATELLITE2_PANEL_COLOR") {
+			parseColor(val, satPanelCol2);
+		}
+		else if (key == "SATELLITE2_SCALE") {
+			satScale2 = std::stof(val);
+		}
+		else if (key == "SATELLITE2_ROT_Y") {
+			satRotY2 = std::stof(val);
+		}
+		else if (key == "SATELLITE2_ENABLED") {
+			sat2Enabled = std::stoi(val);
+		}
+		else if (key == "PLACED_PLANET_COLOR") {
+			parseColor(val, colorPlaced);
+		}
+		else if (key == "PLACED_PLANET_RADIUS") {
+			radPlaced = std::stof(val);
+		}
+		else if (key == "PLACED_PLANET_MASS") {
+			massPlaced = std::stof(val);
+		}
+		else if (key == "PLACED_PLANET_ENABLED")
+		{
+			placedEnabled = std::stoi(val);
+		}
+		else if (key == "PLACED_PLANET_POS")
+		{
+			parseColor(val, posPlaced);
+		}
 	}
 
 	g_maxPlaceablePlanets = std::max(0, available);
@@ -213,6 +260,14 @@ bool loadLevelConfig(const std::string& path) {
 		g_sat->setScale(satScale);
 		g_sat->setRotationY(satRotY);
 	}
+	if (sat2Enabled) {
+		g_sat2 = new Satelit(satPos2 + vec3(2.0f, 0.0f, 0.0f), satBodyColor2);
+		g_sat2->setPanelColor(satPanelCol2);
+		g_sat2->setScale(satScale2);
+		g_sat2->setRotationY(satRotY2 + 45.0f);
+	}
+	if (placedEnabled)
+		g_planetPlaced = new Planet(posPlaced, colorPlaced,radPlaced, massPlaced);
 	return true;
 }
 
@@ -253,6 +308,8 @@ static void stopAndReset() {
 
 	if (g_wormhole) { delete g_wormhole; g_wormhole = nullptr; }
 	if (g_sat) { delete g_sat; g_sat = nullptr; }
+	if (g_sat2) { delete g_sat2; g_sat2 = nullptr; }
+	if (g_planetPlaced) { delete g_planetPlaced; g_planetPlaced = nullptr; }
 	loadLevelConfig(g_currentLevelPath);
 }
 
@@ -381,6 +438,60 @@ void drawHUD()
 	glEnable(GL_DEPTH_TEST);
 }
 
+static void drawLaser(const Satelit* sat, float range)
+{
+	if (!sat) return;
+
+	glPushAttrib(GL_ENABLE_BIT | GL_LINE_BIT | GL_CURRENT_BIT | GL_COLOR_BUFFER_BIT);
+
+	glDisable(GL_LIGHTING);
+	glDisable(GL_BLEND);        
+	glLineWidth(1.5f);
+	glColor3f(1.0f, 0.0f, 0.0f);
+
+	glm::vec3 S = sat->getPosition();
+	glm::vec3 E = S + sat->forward() * range;
+
+	glBegin(GL_LINES);
+	glVertex3f(S.x, S.y, S.z);
+	glVertex3f(E.x, E.y, E.z);
+	glEnd();
+
+	glPopAttrib();
+}
+
+static void drawJammedShell(const Planet* p)
+{
+	if (!p) return;
+
+	const glm::vec3 C = p->getPosition();
+	const float R = p->getRadius();
+	const float scale = 1.04f;
+
+	glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_COLOR_BUFFER_BIT |
+		GL_DEPTH_BUFFER_BIT | GL_POLYGON_BIT | GL_LINE_BIT);
+
+	glDisable(GL_LIGHTING);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	glDepthMask(GL_FALSE);
+
+	glPushMatrix();
+	glTranslatef(C.x, C.y, C.z);
+
+	glColor4f(1.0f, 0.1f, 0.1f, 0.22f);
+	glutSolidSphere(R * scale, 32, 20);
+
+	glLineWidth(1.5f);
+	glColor4f(1.0f, 0.2f, 0.2f, 0.75f);
+	glutWireSphere(R * scale * 1.006f, 24, 16);
+
+	glPopMatrix();
+
+	glDepthMask(GL_TRUE);
+	glPopAttrib();
+}
 
 void display(void)
 {
@@ -401,9 +512,26 @@ void display(void)
 	);
 	nebo.draw();
 	ship.draw();
-	if (g_sat) { g_sat->addSpin(0.2f); g_sat->draw(); }
+	const float JAM_RANGE = 20.0f;
+	if (g_sat) { g_sat->addSpin(0.2f); g_sat->draw(); drawLaser(g_sat, JAM_RANGE);}
+	if (g_sat2) { g_sat2->addSpin(-0.2f); g_sat2->draw(); drawLaser(g_sat2, JAM_RANGE); }
+	
+	
 	if (g_wormhole) g_wormhole->draw();
-	for (auto& p : planets) p->draw();
+	float Jam_GetRemainingFor(const Planet * p);
+	if (g_planetPlaced)
+	{
+		g_planetPlaced->draw();
+		if (Jam_GetRemainingFor(g_planetPlaced) > 0.0f) {
+			drawJammedShell(g_planetPlaced);
+		}
+	}
+	for (auto& p : planets) {
+		p->draw();
+		if (Jam_GetRemainingFor(p) > 0.0f) {
+			drawJammedShell(p);
+		}
+	}
 	drawHUD();
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();

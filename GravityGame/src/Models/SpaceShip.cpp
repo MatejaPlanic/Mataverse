@@ -26,30 +26,38 @@ static bool planetJammed(const Planet* p, const Satelit* sat, float dt)
 {
     if (!sat || !p) return false;
 
-    const float coneDeg = 22.0f;
-    const float range = 20.0f;
-    const float cosHalf = std::cos(glm::radians(coneDeg * 0.5f));
+    const float range = 20.0f;   
+    const float R = p->getRadius();
 
     glm::vec3 S = sat->getPosition();
-    glm::vec3 F = glm::normalize(sat->forward());
-    glm::vec3 to = p->getPosition() - S;
-    float dist = glm::length(to);
+    glm::vec3 F = glm::normalize(sat->forward()); 
+    glm::vec3 to = p->getPosition() - S;          
 
-    if (dist > 0.0f && dist <= range) {
-        glm::vec3 dir = to / dist;
-        float cosang = glm::dot(F, dir);
-        if (cosang >= cosHalf) {
-            g_jamTimers[p] = 2.0f;
+    float dist2 = glm::dot(to, to);             
+    if (dist2 > (range + R) * (range + R)) {       
+        auto it = g_jamTimers.find(p);
+        if (it != g_jamTimers.end()) {
+            it->second -= dt;
+            if (it->second > 0.0f) return true;
+            g_jamTimers.erase(it);
+        }
+        return false;
+    }
+
+    float t = glm::dot(to, F);                     
+    if (t >= 0.0f && t <= range) {
+        float d2 = dist2 - t * t;                  
+        if (d2 <= R * R) {
+            g_jamTimers[p] = 2.0f;                 
         }
     }
 
     auto it = g_jamTimers.find(p);
     if (it != g_jamTimers.end()) {
         it->second -= dt;
-        if (it->second > 0.0f) return true; 
-        else g_jamTimers.erase(it);         
+        if (it->second > 0.0f) return true;
+        g_jamTimers.erase(it);
     }
-
     return false;
 }
 
@@ -282,6 +290,11 @@ void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const Worm
         }
     }
 
+}
+
+float Jam_GetRemainingFor(const Planet* p) {
+    auto it = g_jamTimers.find(p);
+    return (it != g_jamTimers.end()) ? it->second : 0.0f;
 }
 
 
