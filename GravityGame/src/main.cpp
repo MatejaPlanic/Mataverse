@@ -43,6 +43,13 @@ Satelit* g_sat = nullptr;
 Satelit* g_sat2 = nullptr;
 Planet* g_planetPlaced = nullptr;
 
+enum class GameState { TITLE, RUNNING };
+GameState g_state = GameState::TITLE;
+
+static float g_btnX0, g_btnY0, g_btnX1, g_btnY1;
+static float g_btnStartX0, g_btnStartY0, g_btnStartX1, g_btnStartY1;
+static float g_btnExitX0, g_btnExitY0, g_btnExitX1, g_btnExitY1;
+
 bool placingPlanet = false;
 
 #define MOVING_CONST 0.1
@@ -71,6 +78,98 @@ const float zoomStep = 0.5f;
 int winW = int(height * ratio), winH = int(height);
 bool simulationActive = false;
 const float PLANET_MOVE_STEP = 0.5f;
+
+static void orthoBegin() {
+	glDisable(GL_DEPTH_TEST);
+	glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); glOrtho(0, winW, 0, winH, -1, 1);
+	glMatrixMode(GL_MODELVIEW);  glPushMatrix(); glLoadIdentity();
+}
+static void orthoEnd() {
+	glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
+	glEnable(GL_DEPTH_TEST);
+}
+
+static void drawCenteredBitmapString(float cx, float cy, void* font, const std::string& s) {
+	float w = 0.f;
+	for (unsigned char c : s) w += glutBitmapWidth(font, c);
+	glRasterPos2f(cx - w * 0.5f, cy);
+	glutBitmapString(font, (const unsigned char*)s.c_str());
+}
+
+static void drawRoundedRect(float x0, float y0, float x1, float y1, float r, int seg = 20) {
+	const float w = x1 - x0, h = y1 - y0;
+	r = std::max(0.f, std::min(r, std::min(w, h) * 0.5f));
+	glBegin(GL_TRIANGLE_FAN);
+	glVertex2f((x0 + x1) * 0.5f, (y0 + y1) * 0.5f);
+	for (int corner = 0; corner < 4; ++corner) {
+		float cx = (corner == 0 || corner == 3) ? x0 + r : x1 - r;
+		float cy = (corner < 2) ? y1 - r : y0 + r;
+		float a0 = (float)(corner * 90.0 + 0.0) * 3.14159265f / 180.f;
+		float a1 = (float)(corner * 90.0 + 90.0) * 3.14159265f / 180.f;
+		for (int i = 0; i <= seg; ++i) {
+			float t = a0 + (a1 - a0) * (i / (float)seg);
+			glVertex2f(cx + std::cos(t) * r, cy + std::sin(t) * r);
+		}
+	}
+	glEnd();
+}
+
+// Stabilan "pill": centralni pravougaonik + 2 pune polulopte (circle fans)
+static void drawPillButton(float x0, float y0, float x1, float y1, bool primary, float pulse) {
+	const float r = (y1 - y0) * 0.5f;
+	const int   seg = 40;
+
+	// senka
+	glColor4f(0, 0, 0, 0.35f);
+	// senka: samo blago pomerena "pill"
+	// centralni rect
+	glBegin(GL_QUADS);
+	glVertex2f(x0 + 4 + r, y0 - 4); glVertex2f(x1 + 4 - r, y0 - 4);
+	glVertex2f(x1 + 4 - r, y1 - 4); glVertex2f(x0 + 4 + r, y1 - 4);
+	glEnd();
+
+	// ispunjena kapsula
+	if (primary) glColor4f(0.15f, 0.55f, 1.0f, pulse);
+	else         glColor4f(0.15f, 0.15f, 0.18f, 0.92f);
+
+	// centralni rect
+	glBegin(GL_QUADS);
+	glVertex2f(x0 + r, y0); glVertex2f(x1 - r, y0);
+	glVertex2f(x1 - r, y1); glVertex2f(x0 + r, y1);
+	glEnd();
+
+	// tanki okvir
+	glColor3f(1, 1, 1);
+	glBegin(GL_LINE_LOOP);
+	glVertex2f(x0 + r, y0); glVertex2f(x1 - r, y0);
+	glVertex2f(x1 - r, y1); glVertex2f(x0 + r, y1);
+	glEnd();
+}
+
+
+static void layoutTitleButtons() {
+	const float btnW = 320.f, btnH = 64.f, gap = 22.f;
+	const float cx = winW * 0.5f;
+
+	// visina celog bloka (dva dugmeta + razmak)
+	const float groupH = btnH * 2.f + gap;
+	const float cy = winH * 0.5f;          // centar ekrana po Y
+
+	// START (gornje dugme u bloku)
+	g_btnStartX0 = cx - btnW * 0.5f;
+	g_btnStartX1 = cx + btnW * 0.5f;
+	g_btnStartY1 = cy + (groupH * 0.5f) - 0.0f;  // gornja ivica bloka
+	g_btnStartY0 = g_btnStartY1 - btnH;
+
+	// EXIT (donje dugme u bloku) -> niže na ekranu => MANJE Y
+	g_btnExitX0 = g_btnStartX0;
+	g_btnExitX1 = g_btnStartX1;
+	g_btnExitY1 = g_btnStartY0 - gap;      // razmak ispod START-a
+	g_btnExitY0 = g_btnExitY1 - btnH;
+}
+
+
+
 
 static inline std::string trim(const std::string& s) {
 	size_t b = s.find_first_not_of(" \t\r\n");
@@ -438,6 +537,50 @@ void drawHUD()
 	glEnable(GL_DEPTH_TEST);
 }
 
+static void layoutTitleButton() {
+	const float btnW = 280.f, btnH = 64.f;
+	g_btnX0 = (winW - btnW) * 0.5f;
+	g_btnX1 = g_btnX0 + btnW;
+	g_btnY0 = winH * 0.35f;
+	g_btnY1 = g_btnY0 + btnH;
+}
+
+static void drawTitleScreen() {
+	// Nebo je već nacrtano u 3D.
+	// Suptilni overlay da istakne UI
+	orthoBegin();
+	glBegin(GL_QUADS);
+	glColor4f(0.0f, 0.0f, 0.0f, 0.18f); glVertex2f(0, 0);
+	glColor4f(0.0f, 0.0f, 0.0f, 0.18f); glVertex2f(winW, 0);
+	glColor4f(0.0f, 0.0f, 0.0f, 0.28f); glVertex2f(winW, winH);
+	glColor4f(0.0f, 0.0f, 0.0f, 0.28f); glVertex2f(0, winH);
+	glEnd();
+
+	// Naslov - više da ne udara u dugme
+	glColor3f(0.2f, 0.8f, 1.0f);
+	drawCenteredBitmapString(winW * 0.5f, winH * 0.78f, GLUT_BITMAP_HELVETICA_18, "MATAVERSE");
+
+	// Dugmad
+	layoutTitleButtons();
+	float t = glutGet(GLUT_ELAPSED_TIME) * 0.001f;
+	float pulse = 0.90f + 0.10f * (0.5f * (std::sin(t * 3.0f) + 1.0f));
+
+	// Započni
+	drawPillButton(g_btnStartX0, g_btnStartY0, g_btnStartX1, g_btnStartY1, true, pulse);
+	glColor3f(1, 1, 1);
+	float labelOffset = ((g_btnStartY1 - g_btnStartY0) - 18.f) * 0.5f + 4.f;
+	drawCenteredBitmapString((g_btnStartX0 + g_btnStartX1) * 0.5f, g_btnStartY0 + labelOffset, GLUT_BITMAP_HELVETICA_18, "ZAPOCNI IGRU");
+
+	// Napusti
+	drawPillButton(g_btnExitX0, g_btnExitY0, g_btnExitX1, g_btnExitY1, false, 1.0f);
+	drawCenteredBitmapString((g_btnExitX0 + g_btnExitX1) * 0.5f, g_btnExitY0 + labelOffset, GLUT_BITMAP_HELVETICA_18, "NAPUSTI IGRU");
+
+	orthoEnd();
+}
+
+
+
+
 static void drawLaser(const Satelit* sat, float range)
 {
 	if (!sat) return;
@@ -497,48 +640,47 @@ void display(void)
 {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-
+	glMatrixMode(GL_MODELVIEW); glLoadIdentity();
+	glMatrixMode(GL_PROJECTION); glLoadIdentity();
 	gluPerspective(80.0, 16.0 / 9.0, 0.1, 500.0);
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW); glLoadIdentity();
 	gluLookAt(
 		CameraPosition.x, CameraPosition.y, CameraPosition.z,
 		LookAt_vector.x, LookAt_vector.y, LookAt_vector.z,
 		LookUp_vector.x, LookUp_vector.y, LookUp_vector.z
 	);
+
 	nebo.draw();
+
+	if (g_state == GameState::TITLE) {
+		drawTitleScreen();
+		glutSwapBuffers();
+		return;
+	}
+
 	ship.draw();
 	const float JAM_RANGE = 20.0f;
-	if (g_sat) { g_sat->addSpin(0.2f); g_sat->draw(); drawLaser(g_sat, JAM_RANGE);}
+	if (g_sat) { g_sat->addSpin(0.2f);  g_sat->draw();  drawLaser(g_sat, JAM_RANGE); }
 	if (g_sat2) { g_sat2->addSpin(-0.2f); g_sat2->draw(); drawLaser(g_sat2, JAM_RANGE); }
-	
-	
+
 	if (g_wormhole) g_wormhole->draw();
+
 	float Jam_GetRemainingFor(const Planet * p);
-	if (g_planetPlaced)
-	{
+	if (g_planetPlaced) {
 		g_planetPlaced->draw();
-		if (Jam_GetRemainingFor(g_planetPlaced) > 0.0f) {
-			drawJammedShell(g_planetPlaced);
-		}
+		if (Jam_GetRemainingFor(g_planetPlaced) > 0.0f) drawJammedShell(g_planetPlaced);
 	}
 	for (auto& p : planets) {
 		p->draw();
-		if (Jam_GetRemainingFor(p) > 0.0f) {
-			drawJammedShell(p);
-		}
+		if (Jam_GetRemainingFor(p) > 0.0f) drawJammedShell(p);
 	}
 	drawHUD();
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
+
+	glMatrixMode(GL_MODELVIEW); glLoadIdentity();
+	glMatrixMode(GL_PROJECTION); glLoadIdentity();
 	glutSwapBuffers();
 }
+
 
 
 static int g_currentLevelIndex = 1;
@@ -615,6 +757,7 @@ void reshape(GLsizei width, GLsizei heightIn)
 		heightIn = width / ratio;
 	glViewport(0, 0, width, heightIn);
 	winW = width; winH = heightIn;
+	layoutTitleButtons();
 }
 
 void PrintVector(vec3 vec)
@@ -898,6 +1041,27 @@ static Planet* pickPlanetAt(int mx, int myBL)
 
 void mousePress(int button, int state, int x, int y)
 {
+	if (g_state == GameState::TITLE) {
+		if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+			int yBL = winH - y;
+			layoutTitleButtons();
+
+			bool startHit = (x >= g_btnStartX0 && x <= g_btnStartX1 && yBL >= g_btnStartY0 && yBL <= g_btnStartY1);
+			bool exitHit = (x >= g_btnExitX0 && x <= g_btnExitX1 && yBL >= g_btnExitY0 && yBL <= g_btnExitY1);
+
+			if (startHit) {
+				g_state = GameState::RUNNING;
+				stopAndReset();
+				simulationActive = false;
+				glutPostRedisplay();
+			}
+			else if (exitHit) {
+				exit(0);
+			}
+		}
+		return;
+	}
+
 	if (button == GLUT_RIGHT_BUTTON) {
 		if (state == GLUT_DOWN) {
 			g_orbiting = true;
@@ -999,12 +1163,24 @@ static bool deletePlanet(Planet* target)
 
 void keyPress(unsigned char key, int x, int y)
 {
+	if (g_state == GameState::TITLE) {
+		if (key == 13 || key == ' ') { 
+			g_state = GameState::RUNNING;
+			stopAndReset();
+			simulationActive = false;
+			glutPostRedisplay();
+		}
+		else if (key == 27) { 
+			exit(0);
+		}
+		return;
+	}
 
 
 	switch (key)
 	{
 	case 27: //ESC key
-		exit(0);
+		g_state = GameState::TITLE;
 		break;
 	case 'w':
 		MoveForward();
