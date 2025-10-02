@@ -8,7 +8,8 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/norm.hpp> 
 using std::vector;
 using glm::vec3;
 using glm::mat4;
@@ -23,7 +24,6 @@ static vector<vec3> operator*(mat4 mat, vector<vec3> vectors) {
         vectors[i] = mat * vectors[i];
     return vectors;
 }
-
 
 WormHole::WormHole(vec3 pos, float rad, float mass, int brojPrstenova, float rastojanjePrstenova)
     : NebeskoTelo(pos, rad, mass),
@@ -101,19 +101,57 @@ static void connectRingsQuads(const vector<vec3>& A, const vector<vec3>& B) {
     }
 }
 
+static inline glm::mat4 lookRotation(const glm::vec3& dirIn,
+    const glm::vec3& upHint = glm::vec3(0, 1, 0))
+{
+    glm::vec3 f = glm::normalize(dirIn);
+    glm::vec3 up = upHint;
+
+    if (std::abs(glm::dot(f, up)) > 0.999f) {
+        up = std::abs(f.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+    }
+
+    glm::vec3 r = glm::normalize(glm::cross(up, f)); 
+    up = glm::normalize(glm::cross(f, r));           
+
+    glm::mat4 R(1.0f);
+    R[0] = glm::vec4(r, 0.0f);
+    R[1] = glm::vec4(up, 0.0f);
+    R[2] = glm::vec4(f, 0.0f);
+    return R;
+}
+
+void WormHole::orientTowardOnce(const glm::vec3& targetPos)
+{
+    glm::vec3 dir = targetPos - position;
+    if (glm::length2(dir) < 1e-12f) {
+        m_rotation = glm::mat4(1.0f);  
+    }
+    else {
+        m_rotation = lookRotation(glm::normalize(dir), glm::vec3(0, 1, 0));
+    }
+    m_hasRotation = true;
+}
+
 void WormHole::draw() const
 {
     glPushMatrix();
     glTranslatef(position.x, position.y, position.z);
 
-    const int   N = 15;   
-    const int   M = 40;  
+    // Ako nisi orijentisao, nacrtaj bez rotacije (ili možeš asert/guard)
+    if (m_hasRotation) {
+        glMultMatrixf(glm::value_ptr(m_rotation));
+    }
+
+    // --- tvoj postojeći kod crtanja prstenova (netaknut) ---
+    const int   N = 15;
+    const int   M = 40;
 
     const float RADIUS = getRadius();
-    const float L = RADIUS * 1.6f;                   
-    const float rMin = std::max(0.14f * RADIUS, 0.18f);  
-    const float rMax = RADIUS;                           
-    const float power = 2.0f;                            
+    const float L = RADIUS * 1.6f;
+    const float rMin = std::max(0.14f * RADIUS, 0.18f);
+    const float rMax = RADIUS;
+    const float power = 2.0f;
 
     auto colorForU = [](float uAbs) {
         float R = lerp(0.95f, 0.25f, uAbs);
@@ -122,16 +160,12 @@ void WormHole::draw() const
         return glm::vec3(R, G, B);
         };
 
-    vector<vector<vec3>> rings;
-    rings.resize(M + 1);
-
+    std::vector<std::vector<glm::vec3>> rings(M + 1);
     for (int i = 0; i <= M; ++i) {
-        float u = (float(i) / float(M)) * 2.0f - 1.0f;  
+        float u = (float(i) / float(M)) * 2.0f - 1.0f;
         float z = u * L;
-
-        float k = std::pow(std::abs(u), power);        
+        float k = std::pow(std::abs(u), power);
         float r = lerp(rMin, rMax, k);
-
         rings[i] = makeRingLocal(r, z, N);
     }
 
@@ -159,6 +193,5 @@ void WormHole::draw() const
             glVertex3f(rings[i][k].x, rings[i][k].y, rings[i][k].z);
         glEnd();
     }
-
     glPopMatrix();
 }

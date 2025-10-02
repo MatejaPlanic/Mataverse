@@ -36,6 +36,9 @@
     <ClCompile Include="src\Models\Satelit.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\Models\Pulsar.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Models\SpaceShip.h">
@@ -54,6 +57,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\Models\Satelit.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Models\Pulsar.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

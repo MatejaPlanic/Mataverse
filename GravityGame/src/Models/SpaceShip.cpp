@@ -44,11 +44,14 @@ static bool planetJammed(const Planet* p, const Satelit* sat, float dt)
         return false;
     }
 
-    float t = glm::dot(to, F);                     
-    if (t >= 0.0f && t <= range) {
-        float d2 = dist2 - t * t;                  
-        if (d2 <= R * R) {
-            g_jamTimers[p] = 2.0f;                 
+    const float coneDeg = 20.0f;                 
+    const float cosHalf = std::cos(glm::radians(coneDeg));
+
+    float dist = std::sqrt(dist2);
+    if (dist <= range) {
+        glm::vec3 dir = to / std::max(dist, 1e-6f);  
+        if (glm::dot(F, dir) >= cosHalf) {
+            g_jamTimers[p] = 2.0f;                   
         }
     }
 

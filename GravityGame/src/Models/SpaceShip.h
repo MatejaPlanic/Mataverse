@@ -28,6 +28,7 @@ public:
     float mass = 1.0f;
     void update(float dt, const vector<Planet*>& planets, const WormHole* wormhole, const Satelit* sat = nullptr);
 	bool shipCaptured = false;
+	vec3 getPosition() const { return position; }
 
 private:
     void drawKupola() const;

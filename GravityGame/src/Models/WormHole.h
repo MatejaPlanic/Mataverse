@@ -18,7 +18,10 @@ public:
 	WormHole(vec3 pos, float rad,float mass, int brojPrstenova, float rastojanjePrstenova);
 	~WormHole();
 	void draw() const override;
+	void orientTowardOnce(const glm::vec3& targetPos);
 private:
+	mat4 m_rotation = glm::mat4(1.0f);
+	bool m_hasRotation = false;
 	int brojPrstenova;
 	float rastojanjePrstenova;
 	void drawPrsten() const;

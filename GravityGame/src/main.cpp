@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include "./Models/Satelit.h"
+#include "./Models/Pulsar.h"
 
 
 using namespace glm;
@@ -29,7 +30,7 @@ float g_orbitAngle = 0.0f;
 float g_orbitRadius = 3.0f;    
 float g_camHeight = 1.0f;
 
-string g_currentLevelPath = "src/Levels/Level2.txt";
+string g_currentLevelPath = "src/Levels/Level3.txt";
 int   g_maxPlaceablePlanets = 0;     
 int   g_placedThisLevel = 0;     
 
@@ -42,6 +43,7 @@ WormHole* g_wormhole = nullptr;
 Satelit* g_sat = nullptr;
 Satelit* g_sat2 = nullptr;
 Planet* g_planetPlaced = nullptr;
+Pulsar* g_pulsar = nullptr;
 
 enum class GameState { TITLE, RUNNING };
 GameState g_state = GameState::TITLE;
@@ -114,31 +116,25 @@ static void drawRoundedRect(float x0, float y0, float x1, float y1, float r, int
 	glEnd();
 }
 
-// Stabilan "pill": centralni pravougaonik + 2 pune polulopte (circle fans)
 static void drawPillButton(float x0, float y0, float x1, float y1, bool primary, float pulse) {
 	const float r = (y1 - y0) * 0.5f;
 	const int   seg = 40;
 
-	// senka
 	glColor4f(0, 0, 0, 0.35f);
-	// senka: samo blago pomerena "pill"
-	// centralni rect
+
 	glBegin(GL_QUADS);
 	glVertex2f(x0 + 4 + r, y0 - 4); glVertex2f(x1 + 4 - r, y0 - 4);
 	glVertex2f(x1 + 4 - r, y1 - 4); glVertex2f(x0 + 4 + r, y1 - 4);
 	glEnd();
 
-	// ispunjena kapsula
 	if (primary) glColor4f(0.15f, 0.55f, 1.0f, pulse);
 	else         glColor4f(0.15f, 0.15f, 0.18f, 0.92f);
 
-	// centralni rect
 	glBegin(GL_QUADS);
 	glVertex2f(x0 + r, y0); glVertex2f(x1 - r, y0);
 	glVertex2f(x1 - r, y1); glVertex2f(x0 + r, y1);
 	glEnd();
 
-	// tanki okvir
 	glColor3f(1, 1, 1);
 	glBegin(GL_LINE_LOOP);
 	glVertex2f(x0 + r, y0); glVertex2f(x1 - r, y0);
@@ -151,20 +147,17 @@ static void layoutTitleButtons() {
 	const float btnW = 320.f, btnH = 64.f, gap = 22.f;
 	const float cx = winW * 0.5f;
 
-	// visina celog bloka (dva dugmeta + razmak)
 	const float groupH = btnH * 2.f + gap;
-	const float cy = winH * 0.5f;          // centar ekrana po Y
+	const float cy = winH * 0.5f;         
 
-	// START (gornje dugme u bloku)
 	g_btnStartX0 = cx - btnW * 0.5f;
 	g_btnStartX1 = cx + btnW * 0.5f;
-	g_btnStartY1 = cy + (groupH * 0.5f) - 0.0f;  // gornja ivica bloka
+	g_btnStartY1 = cy + (groupH * 0.5f) - 0.0f;  
 	g_btnStartY0 = g_btnStartY1 - btnH;
 
-	// EXIT (donje dugme u bloku) -> niže na ekranu => MANJE Y
 	g_btnExitX0 = g_btnStartX0;
 	g_btnExitX1 = g_btnStartX1;
-	g_btnExitY1 = g_btnStartY0 - gap;      // razmak ispod START-a
+	g_btnExitY1 = g_btnStartY0 - gap;      
 	g_btnExitY0 = g_btnExitY1 - btnH;
 }
 
@@ -244,6 +237,12 @@ bool loadLevelConfig(const std::string& path) {
 	int placedEnabled = 0;
 	vec3 posPlaced = glm::vec3(0.0f, 0.0f, 0.0f);
 
+	int   pulsarEnabled = 0;
+	vec3 pulsarPos = glm::vec3(0.f, 0.5f, -3.f);
+	float pulsarRadius = 0.6f;
+	float pulsarBeamLen = 3.0f;
+	float pulsarRotDeg = 55.0f;
+
 	std::string line;
 	while (std::getline(f, line)) {
 		line = trim(line);
@@ -307,7 +306,7 @@ bool loadLevelConfig(const std::string& path) {
 		}
 
 		else if (key == "SATELLITE2_POS") {
-			parseColor(val, satPos);
+			parseColor(val, satPos2);
 		}
 		else if (key == "SATELLITE2_BODY_COLOR") {
 			parseColor(val, satBodyColor2);
@@ -341,6 +340,21 @@ bool loadLevelConfig(const std::string& path) {
 		{
 			parseColor(val, posPlaced);
 		}
+		else if (key == "PULSAR_ENABLED") {
+			pulsarEnabled = std::stoi(val);
+		}
+		else if (key == "PULSAR_POS") {    
+			parseColor(val, pulsarPos);        
+		}
+		else if (key == "PULSAR_RADIUS") {
+			pulsarRadius = std::stof(val);
+		}
+		else if (key == "PULSAR_BEAM_LENGTH") {
+			pulsarBeamLen = std::stof(val);
+		}
+		else if (key == "PULSAR_ROT_SPEED") {   
+			pulsarRotDeg = std::stof(val);
+		}
 	}
 
 	g_maxPlaceablePlanets = std::max(0, available);
@@ -351,7 +365,13 @@ bool loadLevelConfig(const std::string& path) {
 
 	g_placedThisLevel = 0;
 
+	if (g_pulsar) { delete g_pulsar; g_pulsar = nullptr; }
+	if (pulsarEnabled) {
+		g_pulsar = new Pulsar(pulsarPos, pulsarRadius, pulsarBeamLen, pulsarRotDeg);
+	}
+
 	g_wormhole = new WormHole(whPos, whRadius, whMass, whRings, whSpacing);
+	g_wormhole->orientTowardOnce(ship.getPosition());
 
 	if (satEnabled) {
 		g_sat = new Satelit(satPos, satBodyColor);
@@ -409,6 +429,7 @@ static void stopAndReset() {
 	if (g_sat) { delete g_sat; g_sat = nullptr; }
 	if (g_sat2) { delete g_sat2; g_sat2 = nullptr; }
 	if (g_planetPlaced) { delete g_planetPlaced; g_planetPlaced = nullptr; }
+	if (g_pulsar) { delete g_pulsar; g_pulsar = nullptr; }
 	loadLevelConfig(g_currentLevelPath);
 }
 
@@ -436,7 +457,6 @@ void RenderString(float x, float y, void* font, double r, double g, double b)
 	glutBitmapString(font, (const unsigned char*)s);
 }
 
-/*--------------------------------------------------*/
 static void hudCircleGeometry(float& panelH, float& cx, float& cy, float& rad)
 {
 	const float pad = 16.0f;
@@ -546,8 +566,7 @@ static void layoutTitleButton() {
 }
 
 static void drawTitleScreen() {
-	// Nebo je već nacrtano u 3D.
-	// Suptilni overlay da istakne UI
+
 	orthoBegin();
 	glBegin(GL_QUADS);
 	glColor4f(0.0f, 0.0f, 0.0f, 0.18f); glVertex2f(0, 0);
@@ -556,22 +575,18 @@ static void drawTitleScreen() {
 	glColor4f(0.0f, 0.0f, 0.0f, 0.28f); glVertex2f(0, winH);
 	glEnd();
 
-	// Naslov - više da ne udara u dugme
 	glColor3f(0.2f, 0.8f, 1.0f);
 	drawCenteredBitmapString(winW * 0.5f, winH * 0.78f, GLUT_BITMAP_HELVETICA_18, "MATAVERSE");
 
-	// Dugmad
 	layoutTitleButtons();
 	float t = glutGet(GLUT_ELAPSED_TIME) * 0.001f;
 	float pulse = 0.90f + 0.10f * (0.5f * (std::sin(t * 3.0f) + 1.0f));
 
-	// Započni
 	drawPillButton(g_btnStartX0, g_btnStartY0, g_btnStartX1, g_btnStartY1, true, pulse);
 	glColor3f(1, 1, 1);
 	float labelOffset = ((g_btnStartY1 - g_btnStartY0) - 18.f) * 0.5f + 4.f;
 	drawCenteredBitmapString((g_btnStartX0 + g_btnStartX1) * 0.5f, g_btnStartY0 + labelOffset, GLUT_BITMAP_HELVETICA_18, "ZAPOCNI IGRU");
 
-	// Napusti
 	drawPillButton(g_btnExitX0, g_btnExitY0, g_btnExitX1, g_btnExitY1, false, 1.0f);
 	drawCenteredBitmapString((g_btnExitX0 + g_btnExitX1) * 0.5f, g_btnExitY0 + labelOffset, GLUT_BITMAP_HELVETICA_18, "NAPUSTI IGRU");
 
@@ -660,8 +675,8 @@ void display(void)
 
 	ship.draw();
 	const float JAM_RANGE = 20.0f;
-	if (g_sat) { g_sat->addSpin(0.2f);  g_sat->draw();  drawLaser(g_sat, JAM_RANGE); }
-	if (g_sat2) { g_sat2->addSpin(-0.2f); g_sat2->draw(); drawLaser(g_sat2, JAM_RANGE); }
+	if (g_sat) { g_sat->addSpin(0.5f);  g_sat->draw();  drawLaser(g_sat, JAM_RANGE); }
+	if (g_sat2) { g_sat2->addSpin(-0.5f); g_sat2->draw(); drawLaser(g_sat2, JAM_RANGE); }
 
 	if (g_wormhole) g_wormhole->draw();
 
@@ -674,6 +689,8 @@ void display(void)
 		p->draw();
 		if (Jam_GetRemainingFor(p) > 0.0f) drawJammedShell(p);
 	}
+
+	if (g_pulsar) g_pulsar->draw();
 	drawHUD();
 
 	glMatrixMode(GL_MODELVIEW); glLoadIdentity();
@@ -736,9 +753,12 @@ void timer(int v)
 	int nowMs = glutGet(GLUT_ELAPSED_TIME);
 	float dt = (nowMs - lastMs) / 1000.0f;
 	lastMs = nowMs;
-
+	if (g_pulsar) g_pulsar->update(dt);
 	if (simulationActive) {
-		ship.update(dt, planets,g_wormhole,g_sat);
+		vector<Planet*> allPlanets = planets;
+		if (g_planetPlaced) allPlanets.push_back(g_planetPlaced);
+		ship.update(dt, allPlanets,g_wormhole,g_sat);
+		
 		if (ship.shipCaptured)
 		{
 			advanceToNextLevel();
