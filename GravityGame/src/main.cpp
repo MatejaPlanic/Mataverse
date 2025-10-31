@@ -14,7 +14,7 @@
 #include "./Models/Satelit.h"
 #include "./Models/Pulsar.h"
 #include <glm/gtc/type_ptr.hpp> 
-
+#include"./Models/Planets/ShieldPlanet.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -47,7 +47,7 @@ float g_orbitAngle = 0.0f;
 float g_orbitRadius = 3.0f;    
 float g_camHeight = 1.0f;
 
-string g_currentLevelPath = "src/Levels/Level1.txt";
+string g_currentLevelPath = "src/Levels/Level3.txt";
 int   g_maxPlaceablePlanets = 0;     
 int   g_placedThisLevel = 0;     
 
@@ -61,6 +61,7 @@ Satelit* g_sat = nullptr;
 Satelit* g_sat2 = nullptr;
 Planet* g_planetPlaced = nullptr;
 Pulsar* g_pulsar = nullptr;
+ShieldPlanet* g_shieldPlanet = nullptr;
 
 enum class GameState { TITLE, RUNNING };
 GameState g_state = GameState::TITLE;
@@ -75,6 +76,11 @@ int   g_lastY = 0;
 float g_orbitPitch = 0.0f;
 
 bool placingPlanet = false;
+
+bool g_isShipHitByPulsar = false;
+
+float g_flashTimer = 0.0f; 
+const float FLASH_DURATION = 0.5f;
 
 #define MOVING_CONST 0.1
 #define ROTATION_CONST 3.14f / 180.f
@@ -109,6 +115,14 @@ static float g_dragDepth = 0.0f;
 static vec3 g_dragPlaneNormal(0.0f);
 static vec3 g_dragOffset(0.0f);
 
+int g_maxPlaceableShields = 0;
+int g_placedShieldsThisLevel = 0;
+bool   g_placingShield = false; 
+float  g_newShieldRadius = 3.0f;
+ShieldPlanet* selectedShield = nullptr;
+
+
+
 static void orthoBegin() {
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_LIGHTING);
@@ -132,8 +146,8 @@ static void initOrbitFromCurrent() {
 	glm::vec3 d = CameraPosition - LookAt_vector;
 	g_orbitRadius = glm::length(d);
 	if (g_orbitRadius < 1e-6f) g_orbitRadius = 1e-6f;
-	g_orbitAngle = std::atan2(d.x, d.z);                           // yaw
-	g_orbitPitch = std::atan2(d.y, glm::length(glm::vec2(d.x, d.z))); // pitch
+	g_orbitAngle = std::atan2(d.x, d.z);                    
+	g_orbitPitch = std::atan2(d.y, glm::length(glm::vec2(d.x, d.z))); 
 	
 	g_orbitPitch = glm::clamp(g_orbitPitch, -PITCH_LIMIT, PITCH_LIMIT);
 }
@@ -393,6 +407,11 @@ bool loadLevelConfig(const std::string& path) {
 	float pulsarBeamLen = 3.0f;
 	float pulsarRotDeg = 55.0f;
 
+	int availableShields = 0;
+	float shieldRad = g_newShieldRadius; 
+	int shieldPlacedEnabled = 0;
+	vec3 shieldPlacedPos = glm::vec3(0.0f);
+
 	std::string line;
 	while (std::getline(f, line)) {
 		line = trim(line);
@@ -414,6 +433,9 @@ bool loadLevelConfig(const std::string& path) {
 		}
 		else if (key == "PLANET_TEMPLATE_RADIUS") {
 			rad = std::stof(val);
+		}
+		else if (key == "AVAILABLE_SHIELDS") {
+			availableShields = std::stoi(val);
 		}
 		else if (key == "PLANET_TEMPLATE_MASS") {
 			mass = std::stof(val);
@@ -513,11 +535,21 @@ bool loadLevelConfig(const std::string& path) {
 	g_newPlanetMass = mass;
 	g_newPlanetForward = fwd;
 
+	g_maxPlaceableShields = std::max(0, availableShields);
+	g_newShieldRadius = shieldRad;
+	g_placedShieldsThisLevel = 0;
+
 	g_placedThisLevel = 0;
 
 	if (g_pulsar) { delete g_pulsar; g_pulsar = nullptr; }
 	if (pulsarEnabled) {
 		g_pulsar = new Pulsar(pulsarPos, pulsarRadius, pulsarBeamLen, pulsarRotDeg);
+	}
+
+	if (g_shieldPlanet) { delete g_shieldPlanet; g_shieldPlanet = nullptr; }
+	if (shieldPlacedEnabled) {
+		g_shieldPlanet = new ShieldPlanet(shieldPlacedPos, shieldRad);
+		if (g_maxPlaceableShields > 0) g_placedShieldsThisLevel = 1;
 	}
 
 	g_wormhole = new WormHole(whPos, whRadius, whMass, whRings, whSpacing);
@@ -559,20 +591,15 @@ static void clearPlanets() {
 
 static void applyMaxScrollZoom()
 {
-	// postavi logiku zoom-a na maksimum (isti mehanizam kao mouseWheel)
 	cameraDistance = maxDistance;
-
-	// zadrži isti pravac gledanja, samo odmakni kameru
 	glm::vec3 viewDirection = glm::normalize(CameraPosition - LookAt_vector);
 	if (!std::isfinite(viewDirection.x) || !std::isfinite(viewDirection.y) || !std::isfinite(viewDirection.z) ||
 		length(viewDirection) < 1e-8f)
 	{
-		// fallback ako je kamera “u tački” sa LookAt-om
 		viewDirection = glm::vec3(0, 0, 1);
 	}
 	CameraPosition = LookAt_vector + viewDirection * cameraDistance;
 
-	// sinhronizuj orbit parametre sa novom pozicijom (desni klik orbit nastavlja normalno)
 	initOrbitFromCurrent();
 }
 
@@ -580,7 +607,9 @@ static void stopAndReset() {
 	simulationActive = false;
 	placingPlanet = false;
 	selectedPlanet = nullptr;
-
+	g_placingShield = false;
+	selectedShield = nullptr;
+	g_placedShieldsThisLevel = 0;
 	clearPlanets();
 	g_placedThisLevel = 0;
 
@@ -599,6 +628,7 @@ static void stopAndReset() {
 	if (g_sat2) { delete g_sat2; g_sat2 = nullptr; }
 	if (g_planetPlaced) { delete g_planetPlaced; g_planetPlaced = nullptr; }
 	if (g_pulsar) { delete g_pulsar; g_pulsar = nullptr; }
+	if (g_shieldPlanet) { delete g_shieldPlanet; g_shieldPlanet = nullptr; }
 	loadLevelConfig(g_currentLevelPath);
 	applyMaxScrollZoom();
 }
@@ -627,13 +657,20 @@ void RenderString(float x, float y, void* font, double r, double g, double b)
 	glutBitmapString(font, (const unsigned char*)s);
 }
 
-static void hudCircleGeometry(float& panelH, float& cx, float& cy, float& rad)
+static void hudCircleGeometry(float& panelH, float& cxP, float& cyP, float& radP, float& cxS, float& cyS, float& radS)
 {
 	const float pad = 16.0f;
-	rad = 12.0f;
+	const float h_space = 250.0f;
+
+	radP = 12.0f;
+	radS = 12.0f;
 	panelH = winH * 0.25f;
-	cx = pad + rad;
-	cy = panelH - pad - rad; 
+
+	cxP = pad + radP;
+	cyP = panelH - (pad + radP);
+
+	cxS = cxP + h_space;
+	cyS = cyP; 
 }
 
 static void drawFilledCircle2D(float cx, float cy, float r, int segments = 48)
@@ -673,9 +710,21 @@ void drawHUD()
 	glDisable(GL_LIGHTING);
 	glDisable(GL_DEPTH_TEST);
 	glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); glOrtho(0, winW, 0, winH, -1, 1);
-	glMatrixMode(GL_MODELVIEW);  glPushMatrix(); glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW);glPushMatrix(); glLoadIdentity();
 
-	float panelH, cx, cy, rad; hudCircleGeometry(panelH, cx, cy, rad);
+	float panelH, cxP, cyP, radP, cxS, cyS, radS;
+	hudCircleGeometry(panelH, cxP, cyP, radP, cxS, cyS, radS);
+
+	int yBL = winH - g_mouseY;
+
+	g_hoverCircle = (g_mouseX >= (cxP - radP) && g_mouseX <= (cxP + radP) &&
+		yBL >= (cyP - radP) && yBL <= (cyP + radP));
+
+	bool g_hoverShieldCircle = false;
+	if (g_maxPlaceableShields > 0) {
+		g_hoverShieldCircle = (g_mouseX >= (cxS - radS) && g_mouseX <= (cxS + radS) &&
+			yBL >= (cyS - radS) && yBL <= (cyS + radS));
+	}
 
 	glColor4f(0.12f, 0.12f, 0.12f, 0.85f);
 	glBegin(GL_QUADS);
@@ -683,15 +732,16 @@ void drawHUD()
 	glEnd();
 
 	if (simulationActive) glColor3f(0.35f, 0.35f, 0.35f);
-	else                  glColor3f(g_hoverCircle ? 0.35f : 0.2f, 0.6f, 1.0f);
-	drawFilledCircle2D(cx, cy, g_hoverCircle ? rad + 2.0f : rad, 48);
+	else glColor3f(g_hoverCircle ? 0.35f : 0.2f, 0.6f, 1.0f);
+
+	drawFilledCircle2D(cxP, cyP, g_hoverCircle ? radP + 2.0f : radP, 48);
 
 	glColor3f(1, 1, 1);
-	float textX = cx + rad + 10.0f;
-	float textY = panelH - 16.0f - 6.0f;
+	float textX = cxP + radP + 10.0f;
+	float textY = cyP + radP - 6.0f;
 	char buf[256];
 	sprintf_s(buf,
-		"poluprecnik = %.2f\nmasa = %.2f%s\npreostalo: %d/%d",
+		"Planeta (R=%.2f)\nmasa = %.2f%s\npreostalo: %d/%d",
 		g_newPlanetRadius,
 		g_newPlanetMass,
 		(!simulationActive && placingPlanet) ? "\n[klik na scenu za postavljanje]" : "",
@@ -701,16 +751,40 @@ void drawHUD()
 	glRasterPos2f(textX, textY);
 	glutBitmapString(GLUT_BITMAP_HELVETICA_18, (const unsigned char*)buf);
 
+	if (g_maxPlaceableShields > 0)
+	{
+		if (simulationActive || g_placedShieldsThisLevel >= g_maxPlaceableShields) glColor3f(0.35f, 0.35f, 0.35f);
+		else glColor3f(g_placingShield || g_hoverShieldCircle ? 0.5f : 0.4f, 0.45f, 0.65f);
+		float currentRadS = (g_placingShield || g_hoverShieldCircle) ? radS + 2.0f : radS;
+		drawFilledCircle2D(cxS, cyS, currentRadS, 48);
+
+		glColor3f(1, 1, 1);
+		float shieldTextX = cxS + radS + 10.0f;
+		float shieldTextY = cyS + radS - 6.0f;
+
+		char shieldBuf[256];
+		sprintf_s(shieldBuf,
+			"SHIELD (R=%.2f)\nmasa = %.2f (NEMA GRAVIT.)%s\npreostalo: %d/%d",
+			g_newShieldRadius,
+			0.0f,
+			(!simulationActive && g_placingShield) ? "\n[klik na scenu za postavljanje]" : "",
+			std::max(0, g_maxPlaceableShields - g_placedShieldsThisLevel),
+			g_maxPlaceableShields
+		);
+		glRasterPos2f(shieldTextX, shieldTextY);
+		glutBitmapString(GLUT_BITMAP_HELVETICA_18, (const unsigned char*)shieldBuf);
+	}
+
 	float bx0, by0, bx1, by1;
 	hudSimButtonGeometry(panelH, bx0, by0, bx1, by1);
 
 	if (simulationActive) {
 		if (g_hoverSim) glColor4f(0.18f, 0.90f, 0.35f, 1.0f);
-		else            glColor4f(0.10f, 0.80f, 0.25f, 1.0f);
+		else glColor4f(0.10f, 0.80f, 0.25f, 1.0f);
 	}
 	else {
 		if (g_hoverSim) glColor4f(0.55f, 0.55f, 0.60f, 0.98f);
-		else            glColor4f(0.35f, 0.35f, 0.35f, 0.98f);
+		else glColor4f(0.35f, 0.35f, 0.35f, 0.98f);
 	}
 
 	glBegin(GL_QUADS);
@@ -729,10 +803,16 @@ void drawHUD()
 	glutBitmapString(GLUT_BITMAP_HELVETICA_18, (const unsigned char*)label);
 
 	glColor3f(0.85f, 0.85f, 0.85f);
-	if (g_hoverCircle) {
-		glRasterPos2f(cx + rad + 10.0f, cy + 4.0f);
+	setPointerCursor(false); 
 
+	if (g_hoverCircle) {
+		setPointerCursor(true);
 	}
+
+	if (g_hoverShieldCircle && !simulationActive && g_maxPlaceableShields > 0) {
+		setPointerCursor(true);
+	}
+
 	if (g_hoverSim) {
 		glRasterPos2f(bx0, by0 - 16.0f);
 		glutBitmapString(GLUT_BITMAP_HELVETICA_12, (const unsigned char*)(simulationActive ? "Klik za reset simulacije" : "Klik da pokrenes simulaciju"));
@@ -859,12 +939,12 @@ void display(void)
 {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	// PROJECTION
+
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	gluPerspective(80.0, 16.0 / 9.0, 0.1, 500.0);
 
-	// MODELVIEW
+
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	gluLookAt(
@@ -873,21 +953,17 @@ void display(void)
 		LookUp_vector.x, LookUp_vector.y, LookUp_vector.z
 	);
 
-	// --- POZICIJE SVETALA (svaki frame, posle kamere!) ---
 	{
-		// postojeća svetla
 		GLfloat L0_pos[] = { 12.0f, 8.0f, -6.0f, 1.0f };
 		glLightfv(GL_LIGHT0, GL_POSITION, L0_pos);
 
 		GLfloat L1_pos[] = { -8.0f, 3.0f, 6.0f, 1.0f };
 		glLightfv(GL_LIGHT1, GL_POSITION, L1_pos);
 
-		// HEAD-LIGHT: direkciono u pravcu gledanja
-		GLfloat L2_dir[] = { 0.0f, 0.0f, -1.0f, 0.0f }; // w=0 => direkciono
+		GLfloat L2_dir[] = { 0.0f, 0.0f, -1.0f, 0.0f };
 		glLightfv(GL_LIGHT2, GL_POSITION, L2_dir);
 	}
 
-	// --- crtaj scenu ---
 	nebo.draw();
 
 	glEnable(GL_LIGHTING);
@@ -920,7 +996,43 @@ void display(void)
 		if (Jam_GetRemainingFor(p) > 0.0f) drawJammedShell(p);
 	}
 
-	if (g_pulsar) g_pulsar->draw();
+	if (g_pulsar)
+	{
+		if (g_shieldPlanet) {
+			g_pulsar->setOccluderSphere(g_shieldPlanet->getPosition(),
+				g_shieldPlanet->getRadius(),
+				true);
+		}
+		else {
+			g_pulsar->setOccluderSphere(glm::vec3(0), 0.0f, false);
+		}
+		g_pulsar->draw();
+	}
+	if (g_shieldPlanet) {
+		g_shieldPlanet->draw();
+	}
+
+	if (g_isShipHitByPulsar) { 
+
+		glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_COLOR_BUFFER_BIT);
+		glDisable(GL_LIGHTING);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+
+		float alpha = g_flashTimer / FLASH_DURATION; 
+		alpha = std::min(0.8f, alpha * 2.5f); 
+
+
+		orthoBegin();
+
+		glColor4f(1.0f, 0.0f, 0.0f, alpha);
+		glBegin(GL_QUADS);
+		glVertex2f(0, 0); glVertex2f(winW, 0); glVertex2f(winW, winH); glVertex2f(0, winH);
+		glEnd();
+		orthoEnd();
+
+		glPopAttrib();
+	}
 
 	drawHUD();
 	drawAxisGizmo();
@@ -984,20 +1096,46 @@ void timer(int v)
 	int nowMs = glutGet(GLUT_ELAPSED_TIME);
 	float dt = (nowMs - lastMs) / 1000.0f;
 	lastMs = nowMs;
+
+
+	if (g_flashTimer > 0.0f) {
+		g_flashTimer = std::max(0.0f, g_flashTimer - dt);
+
+		if (g_flashTimer == 0.0f) {
+			stopAndReset();
+		}
+	}
+
+
+	bool shouldReset = false;
+
 	if (g_pulsar) g_pulsar->update(dt);
+
 	if (simulationActive) {
 		vector<Planet*> allPlanets = planets;
 		if (g_planetPlaced) allPlanets.push_back(g_planetPlaced);
-		ship.update(dt, allPlanets,g_wormhole,g_sat);
-		
-		if (ship.shipCaptured)
-		{
-			advanceToNextLevel();
+		ship.update(dt, allPlanets, g_wormhole, g_sat);
+
+		if (g_pulsar) {
+			const float shipR = 0.25f;
+			if (g_pulsar->hitsShip(ship.getPosition(), shipR)) {
+				if (g_flashTimer == 0.0f) { 
+					g_isShipHitByPulsar = true;
+					g_flashTimer = FLASH_DURATION;
+				}
+			}
 		}
 
 		if (ship.hitsAny(allPlanets)) {
-			simulationActive = false;
-			stopAndReset();
+			if (g_flashTimer == 0.0f) {
+				g_isShipHitByPulsar = true;
+				g_flashTimer = FLASH_DURATION;
+			}
+		}
+
+		if (ship.shipCaptured)
+		{
+			advanceToNextLevel();
 		}
 	}
 
@@ -1049,13 +1187,13 @@ void MoveBackward()
 	CameraPosition = mt * CameraPosition;
 }
 
-static void nudgeSelectedPlanetDepth(int wheelDirection)
+static void nudgeDepth(NebeskoTelo* obj, int wheelDirection)
 {
-	if (!selectedPlanet) return;
+	if (!obj) return;
 
 	glm::vec3 fwd = glm::normalize(LookAt_vector - CameraPosition);
 
-	glm::vec3 pos = selectedPlanet->getPosition();
+	glm::vec3 pos = obj->getPosition();
 	float currDepth = glm::dot(pos - CameraPosition, fwd);
 	glm::vec3 lateral = pos - (CameraPosition + fwd * currDepth);
 
@@ -1065,7 +1203,7 @@ static void nudgeSelectedPlanetDepth(int wheelDirection)
 	newDepth = std::max(PLANET_MIN_DEPTH, std::min(PLANET_MAX_DEPTH, newDepth));
 
 	glm::vec3 newPos = CameraPosition + fwd * newDepth + lateral;
-	selectedPlanet->setPosition(newPos);
+	obj->setPosition(newPos);
 }
 
 static void moveSelectedPlanetXY(float dx, float dy)
@@ -1078,10 +1216,17 @@ static void moveSelectedPlanetXY(float dx, float dy)
 
 void mouseWheel(int wheel, int direction, int x, int y)
 {
-	if (selectedPlanet && !simulationActive) {
-		nudgeSelectedPlanetDepth(direction);
-		glutPostRedisplay();
-		return;
+	if (!simulationActive) {
+		if (selectedShield) {           
+			nudgeDepth(selectedShield, direction);
+			glutPostRedisplay();
+			return;
+		}
+		if (selectedPlanet) {           
+			nudgeDepth(selectedPlanet, direction);
+			glutPostRedisplay();
+			return;
+		}
 	}
 
 	if (direction > 0) cameraDistance -= zoomStep;
@@ -1095,6 +1240,7 @@ void mouseWheel(int wheel, int direction, int x, int y)
 
 	glutPostRedisplay();
 }
+
 
 
 
@@ -1221,19 +1367,16 @@ void initGL(void)
 	glEnable(GL_DEPTH_TEST);
 	glShadeModel(GL_SMOOTH);
 
-	// --- Lighting on ---
 	glEnable(GL_LIGHTING);
-	glEnable(GL_LIGHT0); // key light
-	glEnable(GL_LIGHT1); // fill light (slabo)
+	glEnable(GL_LIGHT0);
+	glEnable(GL_LIGHT1); 
 
-	// Global ambient (niska vrednost da senke ostanu tamne)
 	{
 		GLfloat globalAmb[] = { 0.22f, 0.22f, 0.25f, 1.0f };
 		glLightModelfv(GL_LIGHT_MODEL_AMBIENT, globalAmb);
 
 	}
 
-	// LIGHT0: jače, belo
 	{
 		GLfloat diff0[] = { 1.15f, 1.15f, 1.15f, 1.0f };
 		GLfloat spec0[] = { 1.0f,  1.0f,  1.0f,  1.0f };
@@ -1241,7 +1384,6 @@ void initGL(void)
 		glLightfv(GL_LIGHT0, GL_SPECULAR, spec0);
 	}
 
-	// LIGHT1: slabo “popunjava” senku
 	{
 		GLfloat diff1[] = { 0.55f, 0.55f, 0.60f, 1.0f };
 		GLfloat amb1[] = { 0.10f, 0.10f, 0.12f, 1.0f };
@@ -1255,10 +1397,8 @@ void initGL(void)
 	glLightfv(GL_LIGHT2, GL_DIFFUSE, diff2);
 	glLightfv(GL_LIGHT2, GL_AMBIENT, amb2);
 
-	// Materijal i normalizacija
 	glEnable(GL_NORMALIZE);
 
-	// Ako koristiš per-vertex boje (glColor*), ostavi COLOR_MATERIAL:
 	glEnable(GL_COLOR_MATERIAL);
 	glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 
@@ -1266,7 +1406,6 @@ void initGL(void)
 	glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, matSpec);
 	glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 48.0f);
 
-	// Transparencija (za HUD/efekte)
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
@@ -1323,6 +1462,7 @@ static Planet* pickPlanetAt(int mx, int myBL)
 
 void mousePress(int button, int state, int x, int y)
 {
+
 	if (g_state == GameState::TITLE) {
 		if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
 			int yBL = winH - y;
@@ -1344,6 +1484,7 @@ void mousePress(int button, int state, int x, int y)
 		return;
 	}
 
+
 	if (button == GLUT_RIGHT_BUTTON) {
 		if (state == GLUT_DOWN) {
 			g_orbiting = true;
@@ -1359,14 +1500,17 @@ void mousePress(int button, int state, int x, int y)
 
 	int yBL = winH - y;
 
+
 	if (button == GLUT_LEFT_BUTTON && state == GLUT_UP) {
-		g_draggingPlanet = false;
+		g_draggingPlanet = false; 
 		return;
 	}
 
 	if (button != GLUT_LEFT_BUTTON || state != GLUT_DOWN) return;
 
-	float panelH, cx, cy, rad; hudCircleGeometry(panelH, cx, cy, rad);
+
+	float panelH, cxP, cyP, radP, cxS, cyS, radS;
+	hudCircleGeometry(panelH, cxP, cyP, radP, cxS, cyS, radS);
 
 	float bx0, by0, bx1, by1;
 	hudSimButtonGeometry(panelH, bx0, by0, bx1, by1);
@@ -1384,16 +1528,20 @@ void mousePress(int button, int state, int x, int y)
 
 	if (simulationActive) {
 		placingPlanet = false;
+		g_placingShield = false;
 		selectedPlanet = nullptr;
+		selectedShield = nullptr; 
 		return;
 	}
 
-	float dx = x - cx;
-	float dy = yBL - cy;
-	if ((dx * dx + dy * dy) <= rad * rad) {
+	float dxP = x - cxP;
+	float dyP = yBL - cyP;
+	if ((dxP * dxP + dyP * dyP) <= radP * radP) {
 		if (g_placedThisLevel < g_maxPlaceablePlanets) {
 			placingPlanet = !placingPlanet;
-			if (placingPlanet) selectedPlanet = nullptr;
+			g_placingShield = false;
+			selectedPlanet = nullptr;
+			selectedShield = nullptr;
 		}
 		else {
 			placingPlanet = false;
@@ -1402,52 +1550,127 @@ void mousePress(int button, int state, int x, int y)
 		return;
 	}
 
-	if (placingPlanet) {
-		if (yBL <= panelH) return;
+	if (g_maxPlaceableShields > 0) {
+		float dxS = x - cxS;
+		float dyS = yBL - cyS;
+		if ((dxS * dxS + dyS * dyS) <= radS * radS) {
+			if (g_placedShieldsThisLevel < g_maxPlaceableShields) {
+				g_placingShield = !g_placingShield;
+				placingPlanet = false;
 
-		if (g_placedThisLevel >= g_maxPlaceablePlanets) {
-			placingPlanet = false;
+				if (g_placingShield) {
+					if (selectedPlanet) delete selectedPlanet;
+					selectedPlanet = new ShieldPlanet(vec3(0.0f), g_newShieldRadius);
+
+					vec3 camDir = glm::normalize(LookAt_vector - CameraPosition);
+					vec3 initialPos = CameraPosition + camDir * g_newPlanetForward;
+					selectedPlanet->setPosition(initialPos);
+				}
+				else {
+					if (selectedPlanet) delete selectedPlanet;
+					selectedPlanet = nullptr;
+				}
+
+				selectedShield = nullptr; 
+			}
+			else {
+				g_placingShield = false;
+			}
 			glutPostRedisplay();
 			return;
 		}
+	}
+
+	if (placingPlanet || g_placingShield) {
+		if (yBL <= panelH) return;
 
 		vec3 ro, rd;
 		screenToWorldRay(x, yBL, ro, rd);
 
-		vec3 pos = CameraPosition + rd * g_newPlanetForward;
+		if (g_placingShield) {
+			if (g_placedShieldsThisLevel >= g_maxPlaceableShields) {
+				g_placingShield = false;
+			}
+			else {
+				if (g_shieldPlanet) delete g_shieldPlanet;
 
-		Planet* np = new Planet(pos, g_newPlanetColor, g_newPlanetRadius, g_newPlanetMass);
-		planets.push_back(np);
-		g_placedThisLevel++;
-		placingPlanet = false;
-		selectedPlanet = np;
-		glutPostRedisplay();
-		return;
+				vec3 pos = CameraPosition + rd * g_newPlanetForward;
+
+				g_shieldPlanet = new ShieldPlanet(pos, g_newShieldRadius);
+				g_placedShieldsThisLevel++;
+				g_placingShield = false;
+				selectedShield = g_shieldPlanet;
+				selectedPlanet = nullptr;
+			}
+			glutPostRedisplay();
+			return;
+		}
+
+		else if (placingPlanet) {
+			if (g_placedThisLevel >= g_maxPlaceablePlanets) {
+				placingPlanet = false;
+			}
+			else {
+				vec3 pos = CameraPosition + rd * g_newPlanetForward;
+
+				Planet* np = new Planet(pos, g_newPlanetColor, g_newPlanetRadius, g_newPlanetMass);
+				planets.push_back(np);
+				g_placedThisLevel++;
+				placingPlanet = false;
+				selectedPlanet = np;
+				selectedShield = nullptr;
+			}
+			glutPostRedisplay();
+			return;
+		}
 	}
 
-	selectedPlanet = pickPlanetAt(x, yBL);
+	selectedPlanet = nullptr;
+	selectedShield = nullptr;
 
-	if (selectedPlanet && !simulationActive) {
-		g_draggingPlanet = true;
+	if (g_shieldPlanet) {
+		float t_hit = 0.0f;
+		vec3 ro, rd;
+		screenToWorldRay(x, yBL, ro, rd);
 
-		glm::vec3 ro, rd;
+		if (raySphereHit(ro, rd, g_shieldPlanet->getPosition(), g_shieldPlanet->getRadius(), t_hit)) {
+			selectedShield = g_shieldPlanet;
+		}
+	}
+
+	if (!selectedShield) {
+		selectedPlanet = pickPlanetAt(x, yBL);
+
+		if (!selectedPlanet && g_planetPlaced) {
+			float t_hit = 0.0f;
+			vec3 ro, rd;
+			screenToWorldRay(x, yBL, ro, rd);
+			if (raySphereHit(ro, rd, g_planetPlaced->getPosition(), g_planetPlaced->getRadius(), t_hit)) {
+				selectedPlanet = g_planetPlaced;
+			}
+		}
+	}
+
+	if ((selectedPlanet || selectedShield) && !simulationActive) {
+		g_draggingPlanet = true; 
+
+		NebeskoTelo* draggedObject = selectedShield ? (NebeskoTelo*)selectedShield : (NebeskoTelo*)selectedPlanet;
+
+		vec3 ro, rd;
 		screenToWorldRay(x, yBL, ro, rd);
 
 		g_dragPlaneNormal = glm::normalize(LookAt_vector - CameraPosition);
-
-		g_dragDepth = glm::dot(selectedPlanet->getPosition() - CameraPosition, g_dragPlaneNormal);
+		g_dragDepth = glm::dot(draggedObject->getPosition() - CameraPosition, g_dragPlaneNormal);
 
 		float t;
 		glm::vec3 planePoint = CameraPosition + g_dragPlaneNormal * g_dragDepth;
 		if (rayPlaneHit(ro, rd, planePoint, g_dragPlaneNormal, t)) {
 			glm::vec3 hit = ro + rd * t;
-			g_dragOffset = selectedPlanet->getPosition() - hit;
+			g_dragOffset = draggedObject->getPosition() - hit;
 		}
 		else {
 			g_dragOffset = glm::vec3(0.0f);
 		}
-		glutPostRedisplay();
-		return;
 	}
 
 	glutPostRedisplay();
@@ -1457,7 +1680,10 @@ void mousePress(int button, int state, int x, int y)
 void mouseMotion(int x, int y) {
 	int yBL = winH - y;
 
-	if (g_draggingPlanet && selectedPlanet && !simulationActive) {
+	if (g_draggingPlanet && !simulationActive && (selectedPlanet || selectedShield)) {
+
+		NebeskoTelo* draggedObject = selectedShield ? (NebeskoTelo*)selectedShield : (NebeskoTelo*)selectedPlanet;
+
 		glm::vec3 ro, rd; screenToWorldRay(x, yBL, ro, rd);
 		glm::vec3 planePoint = CameraPosition + g_dragPlaneNormal * g_dragDepth;
 
@@ -1467,10 +1693,12 @@ void mouseMotion(int x, int y) {
 			glm::vec3 newPos = hit + g_dragOffset;
 
 			int mods = glutGetModifiers();
+
 			if (mods & GLUT_ACTIVE_SHIFT) {
-				newPos.y = selectedPlanet->getPosition().y;
+				newPos.y = draggedObject->getPosition().y;
 			}
-			selectedPlanet->setPosition(newPos);
+
+			draggedObject->setPosition(newPos);
 			glutPostRedisplay();
 		}
 		return;
@@ -1485,8 +1713,8 @@ void mouseMotion(int x, int y) {
 	const float sens = 0.01f;
 	const float sensY = 0.02f;
 
-	g_orbitAngle += dx * sens;      
-   
+	g_orbitAngle += dx * sens;
+
 
 	const float PI = 3.14159265358979323846f;
 	const float TWO_PI = 2.0f * PI;
@@ -1511,9 +1739,17 @@ void passiveMotion(int x, int y) {
 	g_hoverStart = (x >= g_btnStartX0 && x <= g_btnStartX1 && yBL >= g_btnStartY0 && yBL <= g_btnStartY1);
 	g_hoverExit = (x >= g_btnExitX0 && x <= g_btnExitX1 && yBL >= g_btnExitY0 && yBL <= g_btnExitY1);
 
-	float panelH, cx, cy, rad; hudCircleGeometry(panelH, cx, cy, rad);
-	float dx = x - cx, dy = yBL - cy;
-	g_hoverCircle = ((dx * dx + dy * dy) <= rad * rad);
+	float panelH, cxP, cyP, radP, cxS, cyS, radS;
+	hudCircleGeometry(panelH, cxP, cyP, radP, cxS, cyS, radS);
+
+	float dxP = x - cxP, dyP = yBL - cyP;
+	g_hoverCircle = ((dxP * dxP + dyP * dyP) <= radP * radP);
+
+	bool g_hoverShieldCircle = false;
+	if (g_maxPlaceableShields > 0) {
+		float dxS = x - cxS, dyS = yBL - cyS;
+		g_hoverShieldCircle = ((dxS * dxS + dyS * dyS) <= radS * radS);
+	}
 
 	float bx0, by0, bx1, by1; hudSimButtonGeometry(panelH, bx0, by0, bx1, by1);
 	g_hoverSim = (x >= bx0 && x <= bx1 && yBL >= by0 && yBL <= by1);
@@ -1523,13 +1759,11 @@ void passiveMotion(int x, int y) {
 		setPointerCursor(onBtn);
 	}
 	else {
-		bool anyHUD = (g_hoverCircle || g_hoverSim);
+		bool anyHUD = (g_hoverCircle || g_hoverShieldCircle || g_hoverSim);
 		setPointerCursor(anyHUD);
 	}
 
 	glutPostRedisplay();
-
-
 }
 
 

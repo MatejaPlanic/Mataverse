@@ -82,14 +82,12 @@ void SpaceShip::draw() const
 {
     glPushAttrib(GL_CURRENT_BIT | GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TRANSFORM_BIT);
 
-    // privremeno isključi ColorMaterial da glColor ne kvari materijal
     GLboolean wasColorMat = glIsEnabled(GL_COLOR_MATERIAL);
     if (wasColorMat) glDisable(GL_COLOR_MATERIAL);
 
-    // --- materijal kupole (blago staklast, bez jake emisije) ---
     GLfloat kup_diff[] = { 0.22f, 0.32f, 0.75f, 1.0f };
     GLfloat kup_spec[] = { 0.55f, 0.60f, 0.80f, 1.0f };
-    GLfloat kup_emit[] = { 0.01f, 0.01f, 0.03f, 1.0f }; // veoma malo ili 0
+    GLfloat kup_emit[] = { 0.01f, 0.01f, 0.03f, 1.0f }; 
     glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, kup_diff);
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, kup_spec);
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 64.0f);
@@ -99,7 +97,6 @@ void SpaceShip::draw() const
     glTranslatef(position.x, position.y, position.z);
     drawKupola();
 
-    // --- materijal prstena (metal) ---
     GLfloat ring_diff[] = { 0.45f, 0.45f, 0.47f, 1.0f };
     GLfloat ring_spec[] = { 0.85f, 0.85f, 0.85f, 1.0f };
     GLfloat no_emit[] = { 0,0,0,1 };
@@ -110,7 +107,6 @@ void SpaceShip::draw() const
     drawPrsten();
     glPopMatrix();
 
-    // vrati stanje
     if (wasColorMat) glEnable(GL_COLOR_MATERIAL);
     glPopAttrib();
 }
@@ -189,7 +185,6 @@ void SpaceShip::spojiKruznice(const std::vector<glm::vec3>& A,
 
 void SpaceShip::drawKupola() const
 {
-    // Materijal – malo smanjen specular da ne “prži”
     GLfloat diff[] = { 0.22f, 0.32f, 0.75f, 1.0f };
     GLfloat spec[] = { 0.65f, 0.70f, 0.85f, 1.0f };
     GLfloat emis[] = { 0.00f, 0.00f, 0.02f, 1.0f };
@@ -198,23 +193,19 @@ void SpaceShip::drawKupola() const
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 48.0f);
     glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emis);
 
-    // Poluprečnici elipsoida (kupola je spljoštena po Y)
     const float a = 1.0f, b = 0.5f, c = 1.0f;
 
     if (lopta.size() < 2) return;
 
-    // Crtaj SAMO gornju hemisferu -> do polovine prstenova
     const int rings = (int)lopta.size();
     const int segs = (int)lopta[0].size();
     const int halfR = rings / 2;
 
     auto emitEllipsoidVertex = [&](const glm::vec3& ps)
         {
-            // pozicija elipsoida
-            glm::vec3 p(ps.x * a, ps.y * b, ps.z * c);
-            // normala elipsoida: (x/a^2, y/b^2, z/c^2)
-            glm::vec3 n(ps.x / (a * a), ps.y / (b * b), ps.z / (c * c));
-            n = glm::normalize(n);
+            vec3 p(ps.x * a, ps.y * b, ps.z * c);
+            vec3 n(ps.x / (a * a), ps.y / (b * b), ps.z / (c * c));
+            n = normalize(n);
 
             glNormal3f(n.x, n.y, n.z);
             glVertex3f(p.x, p.y, p.z);
@@ -231,10 +222,8 @@ void SpaceShip::drawKupola() const
         glEnd();
     }
 
-    // (opciono) mali kružni “cap” na vrhu da zatvori zenit
     const int jCap = 0;
     glBegin(GL_TRIANGLE_FAN);
-    // centralni vrh (severni pol)
     {
         glm::vec3 ps = lopta[halfR][jCap];
         glm::vec3 p = { ps.x * a, ps.y * b, ps.z * c };
@@ -251,7 +240,6 @@ void SpaceShip::drawKupola() const
     }
     glEnd();
 
-    // isključi emisiju posle kupole
     GLfloat zero[] = { 0,0,0,1 };
     glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, zero);
 }
@@ -282,7 +270,6 @@ void SpaceShip::drawPrsten() const
     const int   M = 48, N = 24;
     auto torus = kreirajTorus(R, r, M, N);
 
-    // metalni sivi sa jačim specularom
     GLfloat diff[] = { 0.55f, 0.55f, 0.58f, 1.0f };
     GLfloat spec[] = { 1.0f,  1.0f,  1.0f,  1.0f };
     glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, diff);
@@ -292,7 +279,6 @@ void SpaceShip::drawPrsten() const
     for (int i = 1; i < M; ++i) spojiKruznice(torus[i - 1], torus[i]);
     spojiKruznice(torus[M - 1], torus[0]);
 
-    // lampice – neka "svetle" preko emisije
     const int brojLampica = 12;
     const float lampica_r = 0.015f;
     const float lampice_pozicija_R = R + (r / 2);

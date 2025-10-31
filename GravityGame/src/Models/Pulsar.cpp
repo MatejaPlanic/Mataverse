@@ -2,6 +2,11 @@
 #include <cmath>
 #include <GL/glut.h>    
 #include <glm/gtc/constants.hpp>
+#include <glm/vec3.hpp>
+#include <glm/common.hpp>       
+#include <glm/geometric.hpp>    
+#include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 
 using glm::vec3;
 
@@ -44,22 +49,32 @@ void Pulsar::draw() const
     glPushMatrix();
     glRotatef(angleDeg, 0.f, 1.f, 0.f);
 
-    float wStart = radius * 0.45f; 
-    float wEnd = radius * 0.04f;   
+    float wStart = radius * 0.45f;
+    float wEnd = radius * 0.04f;
+
+    const float zOffset = radius * 0.15f;
+    const float a = glm::radians(angleDeg);
+    const glm::mat3 R = glm::mat3(glm::rotate(glm::mat4(1.f), a, glm::vec3(0, 1, 0)));
+    const glm::vec3 fwd = glm::normalize(R * glm::vec3(0, 0, 1));
+    const glm::vec3 bwd = -fwd;
+    const glm::vec3 O1 = position + R * glm::vec3(0, 0, zOffset);
+    const glm::vec3 O2 = position + R * glm::vec3(0, 0, -zOffset);
+
+    const float len1 = truncatedLen(O1, fwd, beamLength);
+    const float len2 = truncatedLen(O2, bwd, beamLength);
 
     glPushMatrix();
     glTranslatef(0.f, 0.f, radius * 0.15f);
-    drawBeamSoft(beamLength, wStart, wEnd,10,32);
+    drawBeamSoft(len1, wStart, wEnd, 10, 32);
     glPopMatrix();
 
     glPushMatrix();
     glRotatef(180.f, 1.f, 0.f, 0.f);
     glTranslatef(0.f, 0.f, radius * 0.15f);
-    drawBeamSoft(beamLength, wStart, wEnd, 10, 32);
+    drawBeamSoft(len2, wStart, wEnd, 10, 32);
     glPopMatrix();
 
-    glPopMatrix(); 
-
+    glPopMatrix();
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
     glEnable(GL_LIGHTING);
@@ -67,6 +82,8 @@ void Pulsar::draw() const
 
     glPopAttrib();
     glPopMatrix();
+
+
 }
 
 void Pulsar::drawGlowSphere(int rings, int sectors) const
@@ -142,3 +159,83 @@ void Pulsar::drawBeamSoft(float length, float widthStart, float widthEnd,
         glPopMatrix();
     }
 }
+
+bool Pulsar::hitsShip(const glm::vec3& shipPos, float shipRadius) const
+{
+    // 1) Izračunaj orijentaciju i izvore obe grede (kao u draw/hitsShip ranije)
+    const float zOffset = radius * 0.15f;
+    const float a = glm::radians(angleDeg);
+    const glm::mat3 R = glm::mat3(glm::rotate(glm::mat4(1.f), a, glm::vec3(0, 1, 0)));
+
+    const glm::vec3 dirFwd = glm::normalize(R * glm::vec3(0, 0, 1));
+    const glm::vec3 dirBwd = -dirFwd;
+
+    const glm::vec3 O1 = position + R * glm::vec3(0, 0, zOffset);
+    const glm::vec3 O2 = position + R * glm::vec3(0, 0, -zOffset);
+
+    auto beamHitsSphere = [&](const glm::vec3& O, const glm::vec3& d) -> bool
+        {
+            // Efektivna dužina posle odsecanja štitom
+            const float effLen = truncatedLen(O, d, beamLength);
+            if (effLen <= 0.0f) return false;
+
+            // Vektor do broda i projekcija na pravac zraka
+            glm::vec3 toShip = shipPos - O;
+            float t = glm::dot(toShip, d);          // d je normalizovan
+
+            // Ako je najbliža tačka pre izvora ili posle kraja skraćenog zraka — nema pogotka
+            if (t < 0.0f || t > effLen) return false;
+
+            // Poprečna udaljenost od linije zraka do centra broda
+            float distSq = glm::dot(toShip, toShip) - t * t;
+
+            // Pogodak ako je ta udaljenost manja od radijusa broda
+            return distSq <= shipRadius * shipRadius;
+        };
+
+    // Proveri obe grede; odsecanje od štita je već uračunato u effLen
+    if (beamHitsSphere(O1, dirFwd)) return true;
+    if (beamHitsSphere(O2, dirBwd)) return true;
+
+    return false;
+}
+
+
+void Pulsar::setOccluderSphere(const glm::vec3& c, float r, bool enabled) {
+    occEnabled = enabled;
+    occCenter = c;
+    occRadius = r;
+}
+
+bool Pulsar::raySphereIntersect(const glm::vec3& ro, const glm::vec3& rd,
+    const glm::vec3& C, float R, float& tHit)
+{
+    // rd je NORMALIZOVAN!
+    glm::vec3 oc = ro - C;
+    float b = 2.0f * glm::dot(oc, rd);
+    float c = glm::dot(oc, oc) - R * R;
+    float D = b * b - 4.0f * c;
+    if (D < 0.0f) return false;
+    float sD = std::sqrt(D);
+    float t0 = (-b - sD) * 0.5f;
+    float t1 = (-b + sD) * 0.5f;
+
+    // uzmi najraniji pozitivan presek
+    float t = (t0 > 0.0f) ? t0 : t1;
+    if (t <= 0.0f) return false;
+    tHit = t;
+    return true;
+}
+
+float Pulsar::truncatedLen(const glm::vec3& ro, const glm::vec3& rd, float baseLen) const
+{
+    if (!occEnabled) return baseLen;
+
+    float tHit;
+    if (raySphereIntersect(ro, rd, occCenter, occRadius, tHit)) {
+        // ako je sfera ispred izvora i unutar osnovne dužine, skrati
+        if (tHit < baseLen) return std::max(0.0f, tHit - 0.02f); // mali epsilon
+    }
+    return baseLen;
+}
+
