@@ -1,5 +1,17 @@
 ﻿#include "Planet.h"
+#include <glm/gtc/type_ptr.hpp>
 
+static inline void emitVertexWithNormal(const glm::vec3& v) {
+	glm::vec3 n = glm::normalize(v);          
+	glNormal3f(n.x, n.y, n.z);
+	glVertex3f(v.x, v.y, v.z);
+}
+
+static inline glm::vec3 faceNormal(const glm::vec3& a,
+	const glm::vec3& b,
+	const glm::vec3& c) {
+	return glm::normalize(glm::cross(b - a, c - a));
+}
 
 static vec3 operator*(mat4x4 mat, vec3 vec)
 {
@@ -17,9 +29,11 @@ static vector<vec3> operator*(mat4x4 mat, vector<vec3> vectors)
 
 Planet::Planet(vec3 pos, vec3 col, float rad, float mas) : NebeskoTelo(pos, rad, mas), color(col) {
 
-	lopta = kreirajLoptu(rad, 32, 32);
+	lopta = kreirajLoptu(rad, 48, 48);
 
 	dodajKratere(0.7f);
+
+	recomputeNormals();
 }
 
 Planet::~Planet() {}
@@ -73,45 +87,59 @@ void Planet::draw() const
 {
 	glPushMatrix();
 	glTranslatef(position.x, position.y, position.z);
-	glShadeModel(GL_SMOOTH); 
 
 	if (lopta.empty()) { glPopMatrix(); return; }
 
-	const int prstenova = (int)lopta.size();
-	const int poPrstenu = (int)lopta[0].size();
+	glShadeModel(GL_SMOOTH);
 
-	for (int i = 0; i < prstenova - 1; i++) {
-		glBegin(GL_QUADS);
-		for (int j = 0; j < poPrstenu; j++) {
-			int jn = (j + 1) % poPrstenu;
+	// Sačuvaj COLOR_MATERIAL pa privremeno podesi naš materijal
+	GLboolean wasColorMat = glIsEnabled(GL_COLOR_MATERIAL);
 
-			const vec3& v00 = lopta[i][j];
-			const vec3& v01 = lopta[i][jn];
-			const vec3& v11 = lopta[i + 1][jn];
-			const vec3& v10 = lopta[i + 1][j];
+	// Koristimo ColorMaterial za ambient+diffuse => dovoljno je glColor3f
+	if (!wasColorMat) glEnable(GL_COLOR_MATERIAL);
+	glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 
-			float f00 = shadeFactor(v00);
-			float f01 = shadeFactor(v01);
-			float f11 = shadeFactor(v11);
-			float f10 = shadeFactor(v10);
+	// Bazna boja planete
+	glColor3f(color.x, color.y, color.z);
 
-			glColor3f(color.x * f00, color.y * f00, color.z * f00);
-			glVertex3f(v00.x, v00.y, v00.z);
+	// Mekši specular da ne naglašava facete
+	GLfloat ks[] = { 0.35f, 0.35f, 0.35f, 1.0f };
+	glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, ks);
+	glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 32.0f);
 
-			glColor3f(color.x * f01, color.y * f01, color.z * f01);
-			glVertex3f(v01.x, v01.y, v01.z);
+	const int R = (int)lopta.size();
+	const int C = (int)lopta[0].size();
 
-			glColor3f(color.x * f11, color.y * f11, color.z * f11);
-			glVertex3f(v11.x, v11.y, v11.z);
+	// Svaki pojas crtamo kao triangle strip sa glatkim normalama
+	for (int i = 0; i < R - 1; ++i)
+	{
+		glBegin(GL_TRIANGLE_STRIP);
+		for (int j = 0; j <= C; ++j) // <=C da spojimo poslednji sa prvim
+		{
+			int jj = j % C;
 
-			glColor3f(color.x * f10, color.y * f10, color.z * f10);
-			glVertex3f(v10.x, v10.y, v10.z);
+			const vec3& v0 = lopta[i][jj];
+			const vec3& v1 = lopta[i + 1][jj];
+
+			const vec3& n0 = normals[i][jj];
+			const vec3& n1 = normals[i + 1][jj];
+
+			glNormal3f(n0.x, n0.y, n0.z);
+			glVertex3f(v0.x, v0.y, v0.z);
+
+			glNormal3f(n1.x, n1.y, n1.z);
+			glVertex3f(v1.x, v1.y, v1.z);
 		}
 		glEnd();
 	}
 
+	// Vrati stanje
+	if (!wasColorMat) glDisable(GL_COLOR_MATERIAL);
+
 	glPopMatrix();
 }
+
+
 
 
 void Planet::dodajKratere(float udubljenje) {
@@ -157,5 +185,32 @@ float Planet::shadeFactor(const vec3& p) const {
 		}
 	}
 	return f;
+}
+
+void Planet::recomputeNormals() {
+	int R = (int)lopta.size();
+	if (R == 0) return;
+	int C = (int)lopta[0].size();
+	normals.assign(R, std::vector<vec3>(C, vec3(0)));
+
+	auto add = [&](int i, int j, const vec3& n) { normals[i][j] += n; };
+
+	for (int i = 0; i < R - 1; i++) {
+		for (int j = 0; j < C; j++) {
+			int jn = (j + 1) % C;
+
+			vec3 v00 = lopta[i][j], v01 = lopta[i][jn];
+			vec3 v11 = lopta[i + 1][jn], v10 = lopta[i + 1][j];
+
+			vec3 nA = glm::normalize(glm::cross(v01 - v00, v10 - v00));
+			vec3 nB = glm::normalize(glm::cross(v11 - v01, v10 - v01));
+
+			add(i, j, nA); add(i, jn, nA); add(i + 1, j, nA);
+			add(i, jn, nB); add(i + 1, jn, nB); add(i + 1, j, nB);
+		}
+	}
+	for (int i = 0; i < R; i++)
+		for (int j = 0; j < C; j++)
+			normals[i][j] = glm::normalize(normals[i][j]);
 }
 

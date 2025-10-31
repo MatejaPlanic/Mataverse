@@ -14,13 +14,15 @@ using namespace std;
 
 class WormHole;
 class Satelit;
-
+class Planet;
 
 class SpaceShip {
 public:
     SpaceShip();
     ~SpaceShip();
     void draw() const;
+
+    static constexpr float COLLISION_RADIUS = 0.1f;
 
     vec3 position{ 0.0f, 0.0f, 0.0f };
     vec3 baseColor{ 0.75f, 0.78f, 0.82f };
@@ -29,6 +31,10 @@ public:
     void update(float dt, const vector<Planet*>& planets, const WormHole* wormhole, const Satelit* sat = nullptr);
 	bool shipCaptured = false;
 	vec3 getPosition() const { return position; }
+
+    bool hitsPlanet(const Planet* p) const;
+
+    bool hitsAny(const std::vector<Planet*>& planets) const;
 
 private:
     void drawKupola() const;

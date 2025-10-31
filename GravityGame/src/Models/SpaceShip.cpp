@@ -8,6 +8,13 @@ static std::unordered_map<const Planet*, float> g_jamTimers;
 using namespace glm;
 using namespace std;
 
+
+static inline void vertexN(const glm::vec3& p) {
+    glm::vec3 n = glm::normalize(p);      
+    glNormal3f(n.x, n.y, n.z);
+    glVertex3f(p.x, p.y, p.z);
+}
+
 static vec3 operator*(mat4x4 mat, vec3 vec)
 {
     vec4 v(vec.x, vec.y, vec.z, 1.f);
@@ -73,12 +80,41 @@ SpaceShip::~SpaceShip() {}
 
 void SpaceShip::draw() const
 {
+    glPushAttrib(GL_CURRENT_BIT | GL_LIGHTING_BIT | GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TRANSFORM_BIT);
+
+    // privremeno isključi ColorMaterial da glColor ne kvari materijal
+    GLboolean wasColorMat = glIsEnabled(GL_COLOR_MATERIAL);
+    if (wasColorMat) glDisable(GL_COLOR_MATERIAL);
+
+    // --- materijal kupole (blago staklast, bez jake emisije) ---
+    GLfloat kup_diff[] = { 0.22f, 0.32f, 0.75f, 1.0f };
+    GLfloat kup_spec[] = { 0.55f, 0.60f, 0.80f, 1.0f };
+    GLfloat kup_emit[] = { 0.01f, 0.01f, 0.03f, 1.0f }; // veoma malo ili 0
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, kup_diff);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, kup_spec);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 64.0f);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, kup_emit);
+
     glPushMatrix();
     glTranslatef(position.x, position.y, position.z);
     drawKupola();
+
+    // --- materijal prstena (metal) ---
+    GLfloat ring_diff[] = { 0.45f, 0.45f, 0.47f, 1.0f };
+    GLfloat ring_spec[] = { 0.85f, 0.85f, 0.85f, 1.0f };
+    GLfloat no_emit[] = { 0,0,0,1 };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, ring_diff);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, ring_spec);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 80.0f);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, no_emit);
     drawPrsten();
     glPopMatrix();
+
+    // vrati stanje
+    if (wasColorMat) glEnable(GL_COLOR_MATERIAL);
+    glPopAttrib();
 }
+
 
 
 vector<vec3> SpaceShip::kreirajKruznicu(vec3 centar, float r, int brojTacaka) const
@@ -127,42 +163,100 @@ void SpaceShip::nacrtaj(GLenum mode, const vector<vec3>& tacke) const
     glEnd();
 }
 
-void SpaceShip::spojiKruznice(const vector<vec3>& prva, const vector<vec3>& druga) const
+void SpaceShip::spojiKruznice(const std::vector<glm::vec3>& A,
+    const std::vector<glm::vec3>& B) const
 {
-    vector<vec3> poligon(4);
-    int n = (int)prva.size();
-    for (int i = 0; i < n - 1; i++)
-    {
-        poligon[0] = prva[i];
-        poligon[1] = druga[i];
-        poligon[2] = druga[i + 1];
-        poligon[3] = prva[i + 1];
-        nacrtaj(GL_POLYGON, poligon);
+    const int n = (int)A.size();
+    for (int i = 0; i < n; ++i) {
+        const glm::vec3& a = A[i];
+        const glm::vec3& b = B[i];
+        const glm::vec3& c = B[(i + 1) % n];
+        const glm::vec3& d = A[(i + 1) % n];
+
+        glm::vec3 nrm = glm::normalize(glm::cross(b - a, d - a)); 
+
+        glBegin(GL_TRIANGLES);
+        glNormal3f(nrm.x, nrm.y, nrm.z); glVertex3f(a.x, a.y, a.z);
+        glNormal3f(nrm.x, nrm.y, nrm.z); glVertex3f(b.x, b.y, b.z);
+        glNormal3f(nrm.x, nrm.y, nrm.z); glVertex3f(c.x, c.y, c.z);
+
+        glNormal3f(nrm.x, nrm.y, nrm.z); glVertex3f(a.x, a.y, a.z);
+        glNormal3f(nrm.x, nrm.y, nrm.z); glVertex3f(c.x, c.y, c.z);
+        glNormal3f(nrm.x, nrm.y, nrm.z); glVertex3f(d.x, d.y, d.z);
+        glEnd();
     }
-    poligon[0] = prva[n - 1];
-    poligon[1] = druga[n - 1];
-    poligon[2] = druga[0];
-    poligon[3] = prva[0];
-    nacrtaj(GL_POLYGON, poligon);
 }
 
 void SpaceShip::drawKupola() const
 {
-	glPushMatrix();
-    glScalef(1.0f, 0.5f, 1.0f);
+    // Materijal – malo smanjen specular da ne “prži”
+    GLfloat diff[] = { 0.22f, 0.32f, 0.75f, 1.0f };
+    GLfloat spec[] = { 0.65f, 0.70f, 0.85f, 1.0f };
+    GLfloat emis[] = { 0.00f, 0.00f, 0.02f, 1.0f };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, diff);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, spec);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 48.0f);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emis);
 
-    if (!lopta.empty())
-        nacrtaj(GL_POLYGON, lopta[0]);
+    // Poluprečnici elipsoida (kupola je spljoštena po Y)
+    const float a = 1.0f, b = 0.5f, c = 1.0f;
 
-    int n = (int)lopta.size();
-    glColor3f(0.2f, 0.2f, 0.7f);
-    for (int i = 1; i < n; i++)
-    {
-        
-        spojiKruznice(lopta[i - 1], lopta[i]);
+    if (lopta.size() < 2) return;
+
+    // Crtaj SAMO gornju hemisferu -> do polovine prstenova
+    const int rings = (int)lopta.size();
+    const int segs = (int)lopta[0].size();
+    const int halfR = rings / 2;
+
+    auto emitEllipsoidVertex = [&](const glm::vec3& ps)
+        {
+            // pozicija elipsoida
+            glm::vec3 p(ps.x * a, ps.y * b, ps.z * c);
+            // normala elipsoida: (x/a^2, y/b^2, z/c^2)
+            glm::vec3 n(ps.x / (a * a), ps.y / (b * b), ps.z / (c * c));
+            n = glm::normalize(n);
+
+            glNormal3f(n.x, n.y, n.z);
+            glVertex3f(p.x, p.y, p.z);
+        };
+
+    for (int i = 1; i <= halfR; ++i) {
+        glBegin(GL_QUAD_STRIP);
+        for (int j = 0; j <= segs; ++j) {
+            const glm::vec3& a0 = lopta[i - 1][j % segs];
+            const glm::vec3& b0 = lopta[i][j % segs];
+            emitEllipsoidVertex(a0);
+            emitEllipsoidVertex(b0);
+        }
+        glEnd();
     }
-	glPopMatrix();
+
+    // (opciono) mali kružni “cap” na vrhu da zatvori zenit
+    const int jCap = 0;
+    glBegin(GL_TRIANGLE_FAN);
+    // centralni vrh (severni pol)
+    {
+        glm::vec3 ps = lopta[halfR][jCap];
+        glm::vec3 p = { ps.x * a, ps.y * b, ps.z * c };
+        glm::vec3 n = glm::normalize(glm::vec3(ps.x / (a * a), ps.y / (b * b), ps.z / (c * c)));
+        glNormal3f(n.x, n.y, n.z);
+        glVertex3f(p.x, p.y, p.z);
+    }
+    for (int j = 0; j <= segs; ++j) {
+        glm::vec3 ps = lopta[halfR - 1][j % segs];
+        glm::vec3 n = glm::normalize(glm::vec3(ps.x / (a * a), ps.y / (b * b), ps.z / (c * c)));
+        glm::vec3 p = { ps.x * a, ps.y * b, ps.z * c };
+        glNormal3f(n.x, n.y, n.z);
+        glVertex3f(p.x, p.y, p.z);
+    }
+    glEnd();
+
+    // isključi emisiju posle kupole
+    GLfloat zero[] = { 0,0,0,1 };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, zero);
 }
+
+
 
 vector<vector<vec3>> SpaceShip::kreirajTorus(float R, float r, int slicesMajor, int slicesMinor) const
 {
@@ -184,45 +278,49 @@ vector<vector<vec3>> SpaceShip::kreirajTorus(float R, float r, int slicesMajor, 
 
 void SpaceShip::drawPrsten() const
 {
-    const float R = 0.25f;
-    const float r = 0.08f;
-    const int   M = 48;
-    const int   N = 24;
+    const float R = 0.25f, r = 0.08f;
+    const int   M = 48, N = 24;
     auto torus = kreirajTorus(R, r, M, N);
 
-    glColor3f(0.4f, 0.4f, 0.4f);
-    for (int i = 1; i < M; ++i)
-        spojiKruznice(torus[i - 1], torus[i]);
+    // metalni sivi sa jačim specularom
+    GLfloat diff[] = { 0.55f, 0.55f, 0.58f, 1.0f };
+    GLfloat spec[] = { 1.0f,  1.0f,  1.0f,  1.0f };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, diff);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, spec);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 96.0f);
 
+    for (int i = 1; i < M; ++i) spojiKruznice(torus[i - 1], torus[i]);
     spojiKruznice(torus[M - 1], torus[0]);
 
-    const int brojLampica = 12; 
+    // lampice – neka "svetle" preko emisije
+    const int brojLampica = 12;
     const float lampica_r = 0.015f;
+    const float lampice_pozicija_R = R + (r / 2);
 
-    glColor3f(0.0f, 0.0f, 1.0f);
+    GLfloat emitBlue[] = { 0.08f, 0.10f, 0.9f, 1.0f };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emitBlue);
 
-    glPushMatrix();
-    const float lampice_pozicija_R = R + (r/2);
-
-    float ugao_rotacije = 2.0f * 3.14f / brojLampica;
-
-    for (int i = 0; i < brojLampica; i++)
+    float ugao_rotacije = 2.0f * 3.14159265f / brojLampica;
+    for (int i = 0; i < brojLampica; ++i)
     {
+        glm::mat4 rot = glm::rotate(i * ugao_rotacije, glm::vec3(0, 1, 0));
+        glm::vec3 pos = rot * glm::vec3(lampice_pozicija_R, 0, 0);
+
         glPushMatrix();
+        glTranslatef(pos.x, pos.y, pos.z);
 
-        mat4x4 rotacija = rotate(i * ugao_rotacije, vec3(0, 1, 0));
-        vec3 pozicija = rotacija * vec3(lampice_pozicija_R, 0, 0);
+        auto lamp = kreirajKruznicu(glm::vec3(0, 0, 0), lampica_r, 16);
+        glBegin(GL_TRIANGLE_FAN);
+        for (auto& v : lamp) vertexN(v);
+        glEnd();
 
-        glTranslatef(pozicija.x, pozicija.y, pozicija.z);
-
-        vector<vec3> lampica = kreirajKruznicu(vec3(0, 0, 0), lampica_r, 16);
-        nacrtaj(GL_POLYGON, lampica);
-
-        glPopMatrix(); 
+        glPopMatrix();
     }
 
-    glPopMatrix(); 
+    GLfloat zero[] = { 0,0,0,1 };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, zero);
 }
+
 
 void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const WormHole* wormhole, const Satelit* sat)
 {
@@ -298,6 +396,24 @@ void SpaceShip::update(float dt, const std::vector<Planet*>& planets, const Worm
 float Jam_GetRemainingFor(const Planet* p) {
     auto it = g_jamTimers.find(p);
     return (it != g_jamTimers.end()) ? it->second : 0.0f;
+}
+
+bool SpaceShip::hitsPlanet(const Planet* p) const {
+    if (!p) return false;
+    const glm::vec3 S = getPosition();
+    const glm::vec3 C = p->getPosition();
+    const float sumR = p->getRadius() + COLLISION_RADIUS;
+
+    const float dist2 = glm::length(S - C);
+    return dist2 <= sumR;
+}
+
+
+bool SpaceShip::hitsAny(const std::vector<Planet*>& planets) const {
+    for (const Planet* p : planets) {
+        if (hitsPlanet(p)) return true;
+    }
+    return false;
 }
 
 

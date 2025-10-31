@@ -31,7 +31,11 @@ private:
     vec3 color;
 
     vector<vector<vec3>> lopta;
-    vector<Krater> kratere;          
+    vector<Krater> kratere;      
+
+    std::vector<std::vector<glm::vec3>> normals;
+    void recomputeNormals();
+
 
     vector<vec3> kreirajKruznicu(vec3 centar, float r, int brojTacaka) const;
     vector<vector<vec3>> kreirajLoptu(float r, int brojTacakaKruznice, int brojKruznica) const;

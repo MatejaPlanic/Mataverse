@@ -14,6 +14,26 @@ using std::vector;
 using glm::vec3;
 using glm::mat4;
 
+
+static inline glm::vec3 triNormal(const glm::vec3& a,
+    const glm::vec3& b,
+    const glm::vec3& c) {
+    return glm::normalize(glm::cross(b - a, c - a));
+}
+
+static void setWormholeMaterial()
+{
+    // Mek, „svemirski“ materijal sa malo emisije
+    GLfloat diff[] = { 0.30f, 0.45f, 0.90f, 1.0f };
+    GLfloat spec[] = { 0.80f, 0.85f, 0.95f, 1.0f };
+    GLfloat emis[] = { 0.03f, 0.04f, 0.08f, 1.0f };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, diff);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, spec);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 64.0f);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emis);
+}
+
+
 static vec3 operator*(mat4 mat, vec3 v) {
     glm::vec4 w(v, 1.f);
     w = mat * w;
@@ -87,18 +107,30 @@ static vector<vec3> makeRingLocal(float ringRadius, float z, int segments) {
     return ring;
 }
 
-static void connectRingsQuads(const vector<vec3>& A, const vector<vec3>& B) {
+static void connectRingsLit(const std::vector<glm::vec3>& A,
+    const std::vector<glm::vec3>& B)
+{
     int N = (int)A.size();
     if (N < 3 || (int)B.size() != N) return;
+
+    glBegin(GL_TRIANGLES);
     for (int i = 0; i < N; ++i) {
         int j = (i + 1) % N;
-        glBegin(GL_QUADS);
+
+        // dva trougla po segmentu: (A[i], B[i], B[j]) i (A[i], B[j], A[j])
+        glm::vec3 n1 = triNormal(A[i], B[i], B[j]);
+        glNormal3f(n1.x, n1.y, n1.z);
         glVertex3f(A[i].x, A[i].y, A[i].z);
         glVertex3f(B[i].x, B[i].y, B[i].z);
         glVertex3f(B[j].x, B[j].y, B[j].z);
+
+        glm::vec3 n2 = triNormal(A[i], B[j], A[j]);
+        glNormal3f(n2.x, n2.y, n2.z);
+        glVertex3f(A[i].x, A[i].y, A[i].z);
+        glVertex3f(B[j].x, B[j].y, B[j].z);
         glVertex3f(A[j].x, A[j].y, A[j].z);
-        glEnd();
     }
+    glEnd();
 }
 
 static inline glm::mat4 lookRotation(const glm::vec3& dirIn,
@@ -137,47 +169,87 @@ void WormHole::draw() const
 {
     glPushMatrix();
     glTranslatef(position.x, position.y, position.z);
+    if (m_hasRotation) glMultMatrixf(glm::value_ptr(m_rotation));
 
-    // Ako nisi orijentisao, nacrtaj bez rotacije (ili možeš asert/guard)
-    if (m_hasRotation) {
-        glMultMatrixf(glm::value_ptr(m_rotation));
-    }
-
-    // --- tvoj postojeći kod crtanja prstenova (netaknut) ---
-    const int   N = 15;
-    const int   M = 40;
-
+    const int   N = 32;      // više segmenata = glađe
+    const int   M = 64;
     const float RADIUS = getRadius();
     const float L = RADIUS * 1.6f;
     const float rMin = std::max(0.14f * RADIUS, 0.18f);
     const float rMax = RADIUS;
-    const float power = 2.0f;
+    const float power = 2.2f;
 
     auto colorForU = [](float uAbs) {
-        float R = lerp(0.95f, 0.25f, uAbs);
-        float G = lerp(0.30f, 0.55f, uAbs);
-        float B = lerp(0.35f, 0.95f, uAbs);
+        // hladna unutra, svetlije ka ustima
+        float R = lerp(0.20f, 0.85f, uAbs);
+        float G = lerp(0.30f, 0.95f, uAbs);
+        float B = lerp(0.65f, 1.00f, uAbs);
         return glm::vec3(R, G, B);
         };
 
     std::vector<std::vector<glm::vec3>> rings(M + 1);
     for (int i = 0; i <= M; ++i) {
-        float u = (float(i) / float(M)) * 2.0f - 1.0f;
+        float u = (float(i) / float(M)) * 2.0f - 1.0f; // [-1..1]
         float z = u * L;
         float k = std::pow(std::abs(u), power);
         float r = lerp(rMin, rMax, k);
         rings[i] = makeRingLocal(r, z, N);
     }
 
+    // === PASS 1: osvetljeno telo (solid) ===
+    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT | GL_COLOR_BUFFER_BIT | GL_POLYGON_BIT | GL_LINE_BIT);
+    glEnable(GL_LIGHTING);
+    glDisable(GL_BLEND);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    setWormholeMaterial();
+
     for (int i = 1; i <= M; ++i) {
         float uMid = (((i - 0.5f) / float(M)) * 2.0f - 1.0f);
         glm::vec3 c = colorForU(std::abs(uMid));
         glColor3f(c.r, c.g, c.b);
-        connectRingsQuads(rings[i - 1], rings[i]);
+        connectRingsLit(rings[i - 1], rings[i]);
     }
 
-    glColor3f(0.10f, 0.15f, 0.25f);
+    // Lagano "svetleća" kapa na oba kraja (disk sa emisijom+alfa)
+    auto drawCap = [&](const std::vector<glm::vec3>& ring, bool front) {
+        // prozirna kapa
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        GLfloat emis[] = { 0.35f, 0.55f, 1.0f, 1.0f };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emis);
+
+        glBegin(GL_TRIANGLE_FAN);
+        // centar
+        glm::vec3 center = ring[0];
+        center.x = center.y = 0.0f; // centar prstena u ravni
+        glNormal3f(0, 0, front ? -1 : 1);
+        glColor4f(0.9f, 0.95f, 1.0f, 0.20f);
+        glVertex3f(center.x, center.y, ring[0].z);
+
+        // obod
+        glColor4f(0.8f, 0.9f, 1.0f, 0.05f);
+        for (int k = 0; k <= (int)ring.size(); ++k) {
+            const auto& v = ring[k % ring.size()];
+            glNormal3f(0, 0, front ? -1 : 1);
+            glVertex3f(v.x, v.y, v.z);
+        }
+        glEnd();
+
+        GLfloat zero[] = { 0,0,0,1 };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, zero);
+        glDisable(GL_BLEND);
+        };
+    drawCap(rings[0], true);
+    drawCap(rings[M], false);
+
+    // === PASS 2: „žičani“ grid preko (bez treperenja) ===
+    glEnable(GL_POLYGON_OFFSET_LINE);
+    glPolygonOffset(-1.0f, -1.0f); // malo pomeri da ne z-bleeduju linije
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glLineWidth(1.0f);
+    glColor4f(0.1f, 0.15f, 0.25f, 0.55f);
 
     for (int i = 0; i <= M; ++i) {
         glBegin(GL_LINE_LOOP);
@@ -193,5 +265,8 @@ void WormHole::draw() const
             glVertex3f(rings[i][k].x, rings[i][k].y, rings[i][k].z);
         glEnd();
     }
+
+    glPopAttrib();
     glPopMatrix();
 }
+
